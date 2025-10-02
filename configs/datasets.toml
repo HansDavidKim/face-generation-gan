@@ -1,0 +1,7 @@
+[dataset]
+face_data = [
+    "jessicali9530/celeba-dataset",
+    "rajnishe/facescrub-full",
+    "annasvoboda/pubfig83",
+    "arnaud58/flickrfaceshq-dataset-ffhq"
+    ]
