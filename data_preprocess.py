@@ -17,7 +17,7 @@ from PIL import Image, ImageFile, ImageOps, UnidentifiedImageError
 from tqdm import tqdm
 
 from config import data_config
-from utils.helper import login_kaggle
+from utils.helper import login_kaggle, get_dataset_list
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True  # allow processing images with minor corruption
 
@@ -148,13 +148,6 @@ DATASET_PREPARERS: Dict[str, SourcePreparer] = {
 DATASET_MAX_IMAGES: Dict[str, int] = {
     "flickrfaceshq-dataset-ffhq": 30_000,
 }
-
-
-def get_dataset_list() -> list[str]:
-    """Return the list of dataset identifiers to download."""
-
-    datasets = data_config.get("dataset", {})
-    return datasets.get("face_data", [])
 
 
 def download_dataset(data_src: str, data_dest: str) -> None:

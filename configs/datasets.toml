@@ -10,5 +10,5 @@ face_data = [
 ### 1 : Cardinality-Aware Identity Sampling
 ### 2 : No need for sampling identities
 id_option = [1,0,0,2]
-
+private_id = [1000, 200, 50, 0]
 size = 64
