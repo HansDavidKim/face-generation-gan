@@ -25,7 +25,21 @@ logging.getLogger("kagglehub.clients").setLevel(logging.WARNING)
 logging.getLogger("kagglehub").setLevel(logging.ERROR)
 
 SUPPORTED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
-DEFAULT_SIZE = (224, 224)
+
+
+def _load_default_size() -> Tuple[int, int]:
+    dataset_cfg = data_config.get("dataset", {})
+    size_value = dataset_cfg.get("size") if isinstance(dataset_cfg, dict) else None
+    try:
+        size_int = int(size_value)
+        if size_int > 0:
+            return (size_int, size_int)
+    except (TypeError, ValueError):
+        pass
+    return (224, 224)
+
+
+DEFAULT_SIZE = _load_default_size()
 
 try:  # Pillow >= 9
     RESAMPLING_FILTER = Image.Resampling.LANCZOS
@@ -359,5 +373,11 @@ def preprocess_dataset(
 if __name__ == "__main__":
     for dataset in get_dataset_list():
         dataset_name = dataset.split("/")[-1]
+
+        download_dataset(
+            data_src=dataset, 
+            data_dest=f'raw_data/{dataset_name}'
+        )
+
         print(f"Processing dataset: {dataset_name}")
         preprocess_dataset(dataset_name)
