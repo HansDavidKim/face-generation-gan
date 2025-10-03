@@ -1,64 +1,74 @@
-Facial GAN Training Suite
-=========================
+Facial GAN Pipeline
+===================
 
-This repository hosts an end-to-end pipeline for experimenting with facial image generation using Generative Adversarial Networks (GANs). Our goal is to train and compare a progression of models—Vanilla GAN, StyleGAN, and StyleGAN2-ADA—to understand their qualitative and quantitative differences on curated face datasets.
+This project prepares large-scale face datasets and trains a sequence of Generative Adversarial Network models (Vanilla GAN, StyleGAN, StyleGAN2-ADA). The repository focuses on reproducible preprocessing, identity-normalised directory layouts, and consistent experiment configuration.
 
-Project Structure
+Repository Layout
 -----------------
-- `config.py` / `configs/`: Load dataset and experiment settings stored in TOML files.
-- `data_preprocess.py`: Downloads face datasets from Kaggle and normalizes every image to 224×224 JPEG (RGB).
-  CelebA/FaceScrub/PubFig identities are shuffled with a fixed random seed and remapped to integer folders, and the FFHQ subset is deterministically down-sampled to 30k images.
-- `utils/helper.py`: Shared utilities, including Kaggle API authentication.
-- `raw_data/`: Destination for the raw Kaggle downloads.
-- `data/`: Preprocessed splits written as `<dataset>/<identity_id>/<image>.jpg` (datasets without identities keep their original folder structure).
+- `config.py` / `configs/`: Centralised TOML configuration (dataset list, target image size, future hyper-parameters).
+- `data_preprocess.py`: End-to-end pipeline that downloads, extracts, identity-normalises, resizes, and samples each dataset.
+- `utils/helper.py`: Shared helpers (e.g., Kaggle authentication).
+- `raw_data/`: Mirrors downloaded archives and raw folders for each dataset.
+- `data/`: Contains processed outputs (`<dataset>/<identity>/<image>.jpg` or flat structure when identities are unavailable).
+- `requirements.txt`: Minimal dependencies (`kaggle`, `kagglehub`, `Pillow`, `tqdm`).
 
-Environment Setup
------------------
-1. Use Python 3.10 or newer.
-2. Provide a Kaggle API key in the `.env` file:
+Getting Started
+---------------
+1. **Python**: Use Python 3.10+ and create an isolated environment.
+2. **Credentials**: Add Kaggle API keys to `.env`:
 
    ```bash
    KAGGLE_USERNAME=your_username
    KAGGLE_KEY=your_key
    ```
 
-3. Install dependencies:
+3. **Dependencies**: Install requirements.
 
    ```bash
    pip install -r requirements.txt
- ```
+   ```
 
-Data Acquisition & Preprocessing
---------------------------------
-1. Review or edit the dataset list under `dataset.face_data` in `configs/datasets.toml`.
-2. (CelebA only) Place the official `identity_CelebA.txt` file under `raw_data/celeba-dataset/` so identities can be remapped.
-3. PubFig will be auto-extracted from `pubfig83.v1.tgz` on the first run; ensure the archive is present in `raw_data/pubfig83/`.
-4. Adjust `DEFAULT_SIZE`, output format, sampling cap, or seed in `data_preprocess.py` if needed.
-5. Run the preprocessing script to standardize all datasets:
+4. **Dataset Config**: Adjust `configs/datasets.toml`.
+   - `dataset.face_data`: List of Kaggle dataset identifiers (downloaded automatically).
+   - `dataset.size`: Target square resolution (e.g., 64, 128, 224). Defaults to 224 when omitted.
+
+5. **Auxiliary Files**: Place additional metadata if available.
+   - `raw_data/celeba-dataset/identity_CelebA.txt` for identity mapping.
+   - `raw_data/pubfig83/pubfig83.v1.tgz` (extracted automatically on first run).
+
+6. **Preprocess Everything**: Run the preprocessing script and monitor tqdm progress per dataset.
 
    ```bash
    python data_preprocess.py
    ```
 
-   Processed 224×224 JPEG images will be written to `data/<dataset_name>/...`.
-   For datasets with identity labels (CelebA identity file, FaceScrub, PubFig), integers starting at 0 replace name-based subfolders (deterministic shuffle with random seed 42 per dataset).
-   FFHQ keeps its flat structure but is limited to a reproducible 30k-image subset (seed configurable).
+   By default the output resolution follows `dataset.size`, images are stored as JPEG, identities are remapped to numeric indices, and FFHQ is down-sampled to a deterministic 30k subset. All randomness is driven by a configurable seed (default 42).
 
-Training Roadmap
-----------------
-- **Vanilla GAN**: Start with a DCGAN-style baseline on CelebA to validate the data pipeline and training loop.
-- **StyleGAN**: Implement or adapt a style-based generator to push toward higher fidelity face synthesis.
-- **StyleGAN2-ADA**: Incorporate Adaptive Discriminator Augmentation for improved stability on limited or imbalanced data.
+Preprocessing Details
+---------------------
+- **Downloads**: Uses `kagglehub` with environment credentials; archives land in `raw_data/<dataset_name>/`.
+- **Extraction**: PubFig archives are safely unpacked; other datasets rely on their native layout.
+- **Identity Handling**:
+  * CelebA leverages `identity_CelebA.txt` to map filenames to original IDs.
+  * FaceScrub and PubFig use folder names; both are merged and re-indexed.
+  * Identities are shuffled deterministically and assigned zero-based numeric folders under `data/<dataset>/`.
+- **Sampling & Size**:
+  * All images are centre-cropped and resized to the configured square resolution using LANCZOS.
+  * FFHQ is randomly sampled to 30,000 images (seeded).
+  * Non-identity datasets respect optional caps while preserving directory hierarchy.
+- **Progress & Logging**: Each dataset displays a tqdm bar and finishes with a summary that reports processed/skipped counts.
 
-All models will consume the same preprocessed datasets; shared experiment parameters (batch size, learning rate, schedulers, etc.) will be added to `configs/` as we iterate. Training scripts will be organized under a dedicated `train/` package.
+Running Specific Datasets
+------------------------
+- Use `preprocess_dataset(dataset_name, seed=42, max_images=None)` within Python to customise seed or sampling limit per dataset.
+- `process_celeba(seed=42)` remains available for quick CLI-style usage.
 
-Milestones
+Next Steps
 ----------
-- [ ] Draft baseline GAN training script and run initial experiments
-- [ ] Integrate experiment tracking (TensorBoard, Weights & Biases, etc.)
-- [ ] Implement training pipelines for StyleGAN and StyleGAN2-ADA
-- [ ] Publish checkpoints and sample galleries for each model
+- Implement GAN training loops (Vanilla, StyleGAN, StyleGAN2-ADA) consuming the processed data.
+- Integrate experiment tracking (TensorBoard / Weights & Biases).
+- Add evaluation scripts (FID, identity preservation metrics) and publish sample outputs.
 
 Contributing
 ------------
-This project evolves alongside ongoing experiments. Please open an issue for feature requests or bug reports. Pull requests are welcome—include a short description of your setup and findings to streamline reviews.
+Issues and pull requests are welcome. Please describe the dataset/seed settings used when reporting results so others can reproduce them exactly.
