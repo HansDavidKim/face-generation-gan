@@ -7,3 +7,4 @@
 *.png
 test.py
 checkpoints/*
+wandb/*
