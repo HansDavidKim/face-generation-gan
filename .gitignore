@@ -5,3 +5,5 @@
 *.jpeg
 *.tgz
 *.png
+test.py
+checkpoints/*

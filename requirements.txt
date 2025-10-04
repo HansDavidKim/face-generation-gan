@@ -2,3 +2,12 @@ kaggle
 kagglehub
 Pillow
 tqdm
+torch
+torchvision
+transformers
+wandb
+scikit-learn
+datasets
+huggingface-hub
+transformers
+accelerate

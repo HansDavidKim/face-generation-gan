@@ -1,0 +1,13 @@
+  0%|                                                                                    | 0/26 [00:00<?, ?it/s]/opt/anaconda3/envs/face_gan/lib/python3.13/site-packages/torch/utils/data/dataloader.py:684: UserWarning: 'pin_memory' argument is set as true but not supported on MPS now, then device pinned memory won't be used.
+  warnings.warn(warn_msg)
+100%|███████████████████████████████████████████████████████████████████████████| 26/26 [00:05<00:00,  4.49it/s]
+{'loss': 3.6183, 'grad_norm': 2.1664531230926514, 'learning_rate': 0.00038461538461538467, 'epoch': 1.0}
+{'train_runtime': 6.7564, 'train_samples_per_second': 60.535, 'train_steps_per_second': 3.848, 'train_loss': 3.6183110750638523, 'epoch': 1.0}
+/opt/anaconda3/envs/face_gan/lib/python3.13/site-packages/torch/utils/data/dataloader.py:684: UserWarning: 'pin_memory' argument is set as true but not supported on MPS now, then device pinned memory won't be used.
+  warnings.warn(warn_msg)
+100%|█████████████████████████████████████████████████████████████████████████████| 4/4 [00:00<00:00, 13.43it/s]
+Processing Files (2 / 2)      : 100%|██████████████████████████████████████████████| 14.2MB / 14.2MB, 3.55MB/s  
+New Data Upload               : 100%|██████████████████████████████████████████████| 14.2MB / 14.2MB, 3.55MB/s  
+  ...1.0_224/model.safetensors: 100%|██████████████████████████████████████████████| 14.2MB / 14.2MB            
+  ...1.0_224/training_args.bin: 100%|██████████████████████████████████████████████| 6.03kB / 6.03kB            
+모델을 Hugging Face Hub에 업로드했습니다: HansDavidKim/google__mobilenet_v2_1.0_224_celeba-dataset

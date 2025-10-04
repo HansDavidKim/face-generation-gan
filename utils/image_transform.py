@@ -1,0 +1,69 @@
+"""Image transform utilities shared across classifier training scripts."""
+
+from __future__ import annotations
+
+from typing import Any, Sequence
+
+from torchvision import transforms
+
+from config import train_config
+
+
+def _select_transform_values(values: Any, index: int, default: Sequence[float]) -> Sequence[float]:
+    """Return per-model mean/std values with sensible fallbacks."""
+
+    if isinstance(values, list) and values:
+        if all(isinstance(v, (int, float)) for v in values):
+            return values
+        if index < len(values) and isinstance(values[index], list):
+            return values[index]
+    return default
+
+
+def get_transform(model_name: str, augment: bool | None = None) -> transforms.Compose:
+    """Construct a torchvision transform pipeline for ``model_name``."""
+
+    cfg = train_config.get("classifier", {}) or {}
+    models = list(cfg.get("model_list", []))
+    cfg_augment = bool(cfg.get("augment", False))
+    augment_flag = cfg_augment if augment is None else augment
+
+    if model_name not in models:
+        raise ValueError(f"Unsupported classifier model: {model_name}")
+
+    index = models.index(model_name)
+
+    size_list = list(cfg.get("input_size", []))
+    try:
+        size = int(size_list[index])
+    except (IndexError, ValueError, TypeError):
+        size = 224
+
+    mean = _select_transform_values(cfg.get("transform_mean"), index, default=[0.5, 0.5, 0.5])
+    std = _select_transform_values(cfg.get("transform_std"), index, default=[0.5, 0.5, 0.5])
+
+    transform_steps = []
+
+    if augment_flag:
+        transform_steps.extend(
+            [
+                transforms.RandomResizedCrop(size, scale=(0.8, 1.0)),
+                transforms.RandomHorizontalFlip(),
+            ]
+        )
+    else:
+        transform_steps.extend(
+            [
+                transforms.Resize(size),
+                transforms.CenterCrop(size),
+            ]
+        )
+
+    transform_steps.extend(
+        [
+            transforms.ToTensor(),
+            transforms.Normalize(mean=mean, std=std),
+        ]
+    )
+
+    return transforms.Compose(transform_steps)

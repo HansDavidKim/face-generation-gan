@@ -1,0 +1,37 @@
+{
+  "os": "macOS-15.5-arm64-arm-64bit-Mach-O",
+  "python": "CPython 3.13.7",
+  "startedAt": "2025-10-04T17:10:12.352826Z",
+  "program": "/Users/kimdaewon/Desktop/facial-gan/train_classifier.py",
+  "codePath": "train_classifier.py",
+  "codePathLocal": "train_classifier.py",
+  "git": {
+    "remote": "https://github.com/HansDavidKim/face-generation-gan.git",
+    "commit": "172ab33e921a5e89dbc97c83a4da2050d7527a42"
+  },
+  "email": "eodnjs5498@naver.com",
+  "root": "/Users/kimdaewon/Desktop/facial-gan",
+  "host": "gimdaewon-ui-MacBookAir.local",
+  "executable": "/opt/anaconda3/envs/face_gan/bin/python",
+  "cpu_count": 8,
+  "cpu_count_logical": 8,
+  "disk": {
+    "/": {
+      "total": "494384795648",
+      "used": "334556168192"
+    }
+  },
+  "memory": {
+    "total": "17179869184"
+  },
+  "apple": {
+    "name": "Apple M3",
+    "ecpuCores": 4,
+    "pcpuCores": 4,
+    "gpuCores": 10,
+    "memoryGb": 16,
+    "swapTotalBytes": "3221225472",
+    "ramTotalBytes": "17179869184"
+  },
+  "writerId": "d7utmidg229tbch131inhbq9u7ynvbsl"
+}

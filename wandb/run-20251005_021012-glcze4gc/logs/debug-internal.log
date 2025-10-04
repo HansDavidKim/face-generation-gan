@@ -1,0 +1,11 @@
+{"time":"2025-10-05T02:10:12.620059+09:00","level":"INFO","msg":"stream: starting","core version":"0.22.1"}
+{"time":"2025-10-05T02:10:12.918819+09:00","level":"INFO","msg":"stream: created new stream","id":"glcze4gc"}
+{"time":"2025-10-05T02:10:12.918849+09:00","level":"INFO","msg":"handler: started","stream_id":"glcze4gc"}
+{"time":"2025-10-05T02:10:12.918943+09:00","level":"INFO","msg":"stream: started","id":"glcze4gc"}
+{"time":"2025-10-05T02:10:12.918948+09:00","level":"INFO","msg":"writer: started","stream_id":"glcze4gc"}
+{"time":"2025-10-05T02:10:12.918956+09:00","level":"INFO","msg":"sender: started","stream_id":"glcze4gc"}
+{"time":"2025-10-05T02:10:27.656144+09:00","level":"INFO","msg":"stream: closing","id":"glcze4gc"}
+{"time":"2025-10-05T02:10:28.38878+09:00","level":"INFO","msg":"fileTransfer: Close: file transfer manager closed"}
+{"time":"2025-10-05T02:10:28.730215+09:00","level":"INFO","msg":"handler: closed","stream_id":"glcze4gc"}
+{"time":"2025-10-05T02:10:28.73254+09:00","level":"INFO","msg":"sender: closed","stream_id":"glcze4gc"}
+{"time":"2025-10-05T02:10:28.732641+09:00","level":"INFO","msg":"stream: closed","id":"glcze4gc"}
