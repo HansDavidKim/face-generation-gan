@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-import os
+import os, random
+import numpy as np
+import torch
+
 from pathlib import Path
 from typing import Optional
 
@@ -19,6 +22,16 @@ def login_kaggle():
 
     os.environ['KAGGLE_USERNAME'] = username
     os.environ['KAGGLE_KEY'] = key
+
+def fix_randomness(seed: int, deterministic: bool):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+
+    if deterministic:
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
 
 def get_dataset_list() -> list[str]:
     """Return the list of dataset identifiers to download."""
