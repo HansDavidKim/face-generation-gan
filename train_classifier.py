@@ -88,7 +88,9 @@ def _create_training_arguments(
 
     if "evaluation_strategy" in signature.parameters:
         kwargs["evaluation_strategy"] = eval_strategy
-    elif "do_eval" in signature.parameters:
+    if "eval_strategy" in signature.parameters:
+        kwargs["eval_strategy"] = eval_strategy
+    if "do_eval" in signature.parameters:
         kwargs["do_eval"] = evaluation
 
     if "save_strategy" in signature.parameters:
