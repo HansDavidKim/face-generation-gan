@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from typing import Tuple
-
 import numpy as np
 from datasets import load_dataset
 from sklearn.model_selection import train_test_split
@@ -69,7 +68,6 @@ def prepare_dataloaders(
     num_workers: int = 4,
 ) -> Tuple[DataLoader, DataLoader, DataLoader]:
     cfg = cfg or get_classifier_config()
-
     fix_randomness(cfg.seed, cfg.deterministic)
 
     base_dataset = ImageFolder(data_root)
@@ -160,27 +158,30 @@ def build_hf_datasets(
             return dataset_dict[name]
 
         train_dataset = _resolve_split("train", "train")
-        if train_dataset is None:
-            raise ValueError(f"Dataset '{hf_dataset}' must provide a train split")
-
-        if sample_limit is not None and len(train_dataset) > sample_limit:
-            train_dataset = train_dataset.select(range(sample_limit))
-
         valid_dataset = _resolve_split("validation", None)
-        test_dataset = _resolve_split("test", "test")
-        if valid_dataset is None and test_dataset is not None:
-            valid_dataset = test_dataset
+        test_dataset = _resolve_split("test", None)
 
-        # === 안전한 라벨 탐색 ===
+        # reference split 확보
         reference_split = train_dataset or valid_dataset or test_dataset
-        candidate_labels = [
-            label_column,
-            "label",
-            "identity",
-            "id",
-            "class",
-            "target",
-        ]
+        if reference_split is None:
+            raise ValueError(f"Dataset '{hf_dataset}' produced no available split")
+
+        # validation/test가 없으면 train을 분할
+        if valid_dataset is None and test_dataset is None and len(reference_split) > 1:
+            labels_tmp = np.arange(len(reference_split))
+            train_idx, valid_idx, test_idx = split_indices(
+                labels_tmp,
+                cfg.train_ratio,
+                cfg.valid_ratio,
+                cfg.test_ratio,
+                cfg.seed,
+                False,
+            )
+            valid_dataset = reference_split.select(valid_idx.tolist()) if valid_idx.size else None
+            test_dataset = reference_split.select(test_idx.tolist()) if test_idx.size else None
+
+        # === Label column 자동 탐색 ===
+        candidate_labels = [label_column, "label", "identity", "id", "class", "target"]
         label_found = None
         for c in candidate_labels:
             if c in reference_split.column_names:
@@ -190,18 +191,17 @@ def build_hf_datasets(
         if label_found is None:
             raise ValueError(
                 f"Dataset '{hf_dataset}' must contain a label column; "
-                f"none of {candidate_labels} found. "
-                f"Available: {reference_split.column_names}"
+                f"none of {candidate_labels} found. Available columns: {reference_split.column_names}"
             )
 
         if label_found != "label":
             print(f"Info: using '{label_found}' as label column for dataset '{hf_dataset}'")
-            for ds_name in ("train_dataset", "valid_dataset", "test_dataset"):
-                ds = locals().get(ds_name)
+            for name in ["train_dataset", "valid_dataset", "test_dataset"]:
+                ds = locals().get(name)
                 if ds is not None and label_found in ds.column_names:
-                    locals()[ds_name] = ds.rename_column(label_found, "label")
+                    locals()[name] = ds.rename_column(label_found, "label")
 
-        # === 이미지 컬럼 식별 ===
+        # === Image column 탐색 ===
         if hf_image_column:
             image_column = hf_image_column
         else:
@@ -210,20 +210,19 @@ def build_hf_datasets(
                 if feature.__class__.__name__ == "Image":
                     image_column = name
                     break
-            if image_column is None:
-                if "image" in reference_split.column_names:
-                    image_column = "image"
-                else:
-                    raise ValueError("Unable to identify image column in dataset")
+            if image_column is None and "image" in reference_split.column_names:
+                image_column = "image"
+            elif image_column is None:
+                raise ValueError("Unable to identify image column in dataset")
 
-        # === 클래스 개수 추론 ===
+        # === Class 개수 ===
         features = train_dataset.features
         if "label" in features and hasattr(features["label"], "names"):
             num_classes = len(features["label"].names)
         else:
             num_classes = len(set(train_dataset["label"]))
 
-        # === 변환 적용 ===
+        # === Transform 적용 ===
         train_dataset = train_dataset.with_transform(
             _build_transform(
                 model_name,
@@ -248,7 +247,7 @@ def build_hf_datasets(
 
         return train_dataset, valid_dataset, test_dataset, num_classes
 
-    # === 로컬 이미지 폴더 ===
+    # === Fallback: Local image folder ===
     split_str = f"train[:{sample_limit}]" if sample_limit is not None else "train"
     dataset = load_dataset("imagefolder", data_dir=data_root, split=split_str)
 
