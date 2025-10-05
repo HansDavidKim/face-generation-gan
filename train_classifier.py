@@ -11,6 +11,8 @@ from typing import Dict, Optional
 import torch
 import inspect
 
+from tqdm.auto import tqdm
+
 from transformers import (
     AutoModelForImageClassification,
     EarlyStoppingCallback,
@@ -283,10 +285,9 @@ def train_all_classifiers(
     skip_set = set(skip_models or [])
     skip_set.add("google/mobilenet_v2_1.0_224")
 
-    for model_name in cfg.model_names:
-        if model_name in skip_set:
-            print(f"Skipping classifier: {model_name}")
-            continue
+    models_to_run = [name for name in cfg.model_names if name not in skip_set]
+
+    for model_name in tqdm(models_to_run, desc="Finetuning classifiers", unit="model"):
         print("=" * 80)
         print(f"Training classifier: {model_name}")
         print("=" * 80)
@@ -319,10 +320,9 @@ def pretrain_classifiers(
     results: Dict[str, Dict[str, float]] = {}
     skip_set = set(skip_models or [])
 
-    for model_name in cfg.model_names:
-        if model_name in skip_set:
-            print(f"Skipping pretraining for classifier: {model_name}")
-            continue
+    models_to_run = [name for name in cfg.model_names if name not in skip_set]
+
+    for model_name in tqdm(models_to_run, desc="Pretraining classifiers", unit="model"):
         print("=" * 80)
         print(f"Pretraining classifier on {dataset_name}: {model_name}")
         print("=" * 80)
