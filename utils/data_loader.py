@@ -171,62 +171,37 @@ def build_hf_datasets(
         if valid_dataset is None and test_dataset is not None:
             valid_dataset = test_dataset
 
-        rename_needed = label_column != "label"
+        # === 안전한 라벨 탐색 ===
+        reference_split = train_dataset or valid_dataset or test_dataset
+        candidate_labels = [
+            label_column,
+            "label",
+            "identity",
+            "id",
+            "class",
+            "target",
+        ]
+        label_found = None
+        for c in candidate_labels:
+            if c in reference_split.column_names:
+                label_found = c
+                break
 
-        def _rename_label(ds):
-            if ds is None:
-                return None
-            if rename_needed:
-                if label_column in ds.column_names:
-                    ds = ds.rename_column(label_column, "label")
-                else:
-                    print(
-                        f"Warning: label column '{label_column}' missing; will derive labels from metadata"
-                    )
-            elif "label" not in ds.column_names:
-                print(
-                    "Warning: 'label' column missing; attempting to infer labels from 'identity' or class ids"
-                )
-            return ds
-
-        train_dataset = _rename_label(train_dataset)
-        valid_dataset = _rename_label(valid_dataset)
-        test_dataset = _rename_label(test_dataset)
-
-        # When validation/test are missing, derive them from the training split.
-        create_additional_splits = (
-            (valid_dataset is None and cfg.valid_ratio > 0)
-            or (valid_dataset is not None and len(valid_dataset) == 0 and cfg.valid_ratio > 0)
-            or (test_dataset is None and cfg.test_ratio > 0)
-            or (test_dataset is not None and len(test_dataset) == 0 and cfg.test_ratio > 0)
-        )
-
-        if create_additional_splits:
-            labels = np.array(train_dataset["label"])
-            train_idx, valid_idx, test_idx = split_indices(
-                labels,
-                cfg.train_ratio,
-                cfg.valid_ratio,
-                cfg.test_ratio,
-                cfg.seed,
-                cfg.is_stratified,
+        if label_found is None:
+            raise ValueError(
+                f"Dataset '{hf_dataset}' must contain a label column; "
+                f"none of {candidate_labels} found. "
+                f"Available: {reference_split.column_names}"
             )
 
-            original_train = train_dataset
-            train_dataset = original_train.select(train_idx.tolist())
-            if valid_dataset is None or len(valid_dataset) == 0:
-                valid_dataset = (
-                    original_train.select(valid_idx.tolist()) if valid_idx.size else None
-                )
-            if test_dataset is None or len(test_dataset) == 0:
-                test_dataset = (
-                    original_train.select(test_idx.tolist()) if test_idx.size else None
-                )
+        if label_found != "label":
+            print(f"Info: using '{label_found}' as label column for dataset '{hf_dataset}'")
+            for ds_name in ("train_dataset", "valid_dataset", "test_dataset"):
+                ds = locals().get(ds_name)
+                if ds is not None and label_found in ds.column_names:
+                    locals()[ds_name] = ds.rename_column(label_found, "label")
 
-        reference_split = train_dataset or valid_dataset or test_dataset
-        if reference_split is None:
-            raise ValueError(f"Dataset '{hf_dataset}' produced no data for training")
-
+        # === 이미지 컬럼 식별 ===
         if hf_image_column:
             image_column = hf_image_column
         else:
@@ -235,43 +210,20 @@ def build_hf_datasets(
                 if feature.__class__.__name__ == "Image":
                     image_column = name
                     break
-            if image_column is None and "image" in reference_split.column_names:
-                image_column = "image"
-            elif image_column is None:
-                raise ValueError("Unable to identify image column in dataset")
+            if image_column is None:
+                if "image" in reference_split.column_names:
+                    image_column = "image"
+                else:
+                    raise ValueError("Unable to identify image column in dataset")
 
-        if "label" not in reference_split.column_names:
-            candidate_cols = [
-                col
-                for col in ("identity", "id", "class", "target")
-                if col in reference_split.column_names
-            ]
-            if candidate_cols:
-                chosen = candidate_cols[0]
-                print(
-                    f"Info: using column '{chosen}' as label for dataset '{hf_dataset}'"
-                )
-
-                def _attach_labels(ds):
-                    if ds is None:
-                        return None
-                    return ds.add_column("label", ds[chosen])
-
-                train_dataset = _attach_labels(train_dataset)
-                valid_dataset = _attach_labels(valid_dataset)
-                test_dataset = _attach_labels(test_dataset)
-            else:
-                raise ValueError(
-                    f"Dataset '{hf_dataset}' must contain a label column; none of {['label','identity','id','class','target']} found"
-                )
-
+        # === 클래스 개수 추론 ===
         features = train_dataset.features
-
         if "label" in features and hasattr(features["label"], "names"):
             num_classes = len(features["label"].names)
         else:
             num_classes = len(set(train_dataset["label"]))
 
+        # === 변환 적용 ===
         train_dataset = train_dataset.with_transform(
             _build_transform(
                 model_name,
@@ -296,7 +248,7 @@ def build_hf_datasets(
 
         return train_dataset, valid_dataset, test_dataset, num_classes
 
-    # Default: assume local image folder structure
+    # === 로컬 이미지 폴더 ===
     split_str = f"train[:{sample_limit}]" if sample_limit is not None else "train"
     dataset = load_dataset("imagefolder", data_dir=data_root, split=split_str)
 
@@ -367,7 +319,6 @@ def _build_transform(
                 processed.append(transform(image.convert("RGB")))
             else:
                 from PIL import Image
-
                 processed.append(transform(Image.open(image).convert("RGB")))
 
         batch["pixel_values"] = processed
