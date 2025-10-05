@@ -234,26 +234,45 @@ def build_hf_datasets(
         # ====================================================
         # Transform 적용
         # ====================================================
-        train_dataset = train_dataset.with_transform(
-            _build_transform(
-                model_name,
-                image_column,
-                augment=cfg.augment,
-                downsample_size=cfg.pretrain_downsample_size,
-            )
-        )
-        eval_transform = _build_transform(
+        train_transform = _build_transform_pipeline(
             model_name,
-            image_column,
+            augment=cfg.augment,
+            downsample_size=cfg.pretrain_downsample_size,
+        )
+        eval_transform = _build_transform_pipeline(
+            model_name,
             augment=False,
             downsample_size=cfg.pretrain_downsample_size,
         )
 
+        train_dataset = _apply_transform_map(
+            train_dataset,
+            transform=train_transform,
+            image_column=image_column,
+            label_column="label",
+            desc=f"Transforming train split for {model_name}",
+        )
         valid_dataset = (
-            valid_dataset.with_transform(eval_transform) if valid_dataset is not None else None
+            _apply_transform_map(
+                valid_dataset,
+                transform=eval_transform,
+                image_column=image_column,
+                label_column="label",
+                desc=f"Transforming validation split for {model_name}",
+            )
+            if valid_dataset is not None
+            else None
         )
         test_dataset = (
-            test_dataset.with_transform(eval_transform) if test_dataset is not None else None
+            _apply_transform_map(
+                test_dataset,
+                transform=eval_transform,
+                image_column=image_column,
+                label_column="label",
+                desc=f"Transforming test split for {model_name}",
+            )
+            if test_dataset is not None
+            else None
         )
 
         return train_dataset, valid_dataset, test_dataset, num_classes
@@ -282,29 +301,48 @@ def build_hf_datasets(
         cfg.is_stratified,
     )
 
-    train_dataset = dataset.select(train_idx.tolist()).with_transform(
-        _build_transform(
-            model_name,
-            image_column,
-            augment=cfg.augment,
-            downsample_size=cfg.pretrain_downsample_size,
-        )
-    )
-    eval_transform = _build_transform(
+    train_transform = _build_transform_pipeline(
         model_name,
-        image_column,
+        augment=cfg.augment,
+        downsample_size=cfg.pretrain_downsample_size,
+    )
+    eval_transform = _build_transform_pipeline(
+        model_name,
         augment=False,
         downsample_size=cfg.pretrain_downsample_size,
     )
 
+    train_dataset = dataset.select(train_idx.tolist())
+    valid_dataset = dataset.select(valid_idx.tolist()) if valid_idx.size else None
+    test_dataset = dataset.select(test_idx.tolist()) if test_idx.size else None
+
+    train_dataset = _apply_transform_map(
+        train_dataset,
+        transform=train_transform,
+        image_column=image_column,
+        label_column="label",
+        desc=f"Transforming train split for {model_name}",
+    )
     valid_dataset = (
-        dataset.select(valid_idx.tolist()).with_transform(eval_transform)
-        if valid_idx.size
+        _apply_transform_map(
+            valid_dataset,
+            transform=eval_transform,
+            image_column=image_column,
+            label_column="label",
+            desc=f"Transforming validation split for {model_name}",
+        )
+        if valid_dataset is not None
         else None
     )
     test_dataset = (
-        dataset.select(test_idx.tolist()).with_transform(eval_transform)
-        if test_idx.size
+        _apply_transform_map(
+            test_dataset,
+            transform=eval_transform,
+            image_column=image_column,
+            label_column="label",
+            desc=f"Transforming test split for {model_name}",
+        )
+        if test_dataset is not None
         else None
     )
 
@@ -315,31 +353,55 @@ def build_hf_datasets(
 # ============================================================
 # Transform builder
 # ============================================================
-def _build_transform(
+def _build_transform_pipeline(
     model_name: str,
-    image_column: str,
     augment: bool,
     downsample_size: int | None = None,
-) -> callable:
-    transform = get_transform(model_name, augment=augment, downsample_size=downsample_size)
+):
+    return get_transform(model_name, augment=augment, downsample_size=downsample_size)
 
-    def _apply(batch):
+
+def _apply_transform_map(
+    dataset,
+    *,
+    transform,
+    image_column: str,
+    label_column: str,
+    desc: str,
+):
+    if dataset is None:
+        return None
+
+    from PIL import Image
+
+    def _process(batch):
         images_raw = batch.get(image_column)
         if images_raw is None:
-            raise KeyError(f"Column '{image_column}' not found in batch: available keys {list(batch.keys())}")
+            raise KeyError(
+                f"Column '{image_column}' not found in batch: available keys {list(batch.keys())}"
+            )
 
-        processed = []
+        pixel_values = []
         for image in images_raw:
             if hasattr(image, "convert"):
-                processed.append(transform(image.convert("RGB")))
+                tensor = transform(image.convert("RGB"))
             else:
-                from PIL import Image
-                processed.append(transform(Image.open(image).convert("RGB")))
+                tensor = transform(Image.open(image).convert("RGB"))
+            pixel_values.append(tensor.numpy())
 
-        batch["pixel_values"] = processed
-        batch["labels"] = batch["label"]
-        batch.pop(image_column, None)
-        batch.pop("label", None)
+        labels = [int(label) for label in batch[label_column]]
+        batch["pixel_values"] = pixel_values
+        batch["labels"] = labels
         return batch
 
-    return _apply
+    remove_columns = [col for col in dataset.column_names if col == image_column]
+
+    mapped = dataset.map(
+        _process,
+        batched=True,
+        batch_size=64,
+        desc=desc,
+        remove_columns=remove_columns,
+    )
+    mapped.set_format(type="torch", columns=["pixel_values", "labels"])
+    return mapped
