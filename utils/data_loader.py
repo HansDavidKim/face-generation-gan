@@ -118,7 +118,118 @@ def build_hf_datasets(
     model_name: str,
     cfg: ClassifierConfig,
     sample_limit: int | None = None,
+    hf_dataset: str | None = None,
+    hf_splits: dict[str, str | None] | None = None,
+    hf_image_column: str | None = None,
+    hf_label_column: str | None = None,
 ):
+    label_column = hf_label_column or "label"
+
+    if hf_dataset:
+        dataset_dict = load_dataset(hf_dataset)
+        hf_splits = hf_splits or {}
+
+        def _resolve_split(key: str, default: str | None = None):
+            name = hf_splits.get(key, default) if hf_splits else default
+            if not name:
+                return None
+            if name not in dataset_dict:
+                raise ValueError(f"Split '{name}' not found in dataset '{hf_dataset}'")
+            return dataset_dict[name]
+
+        train_dataset = _resolve_split("train", "train")
+        if train_dataset is None:
+            raise ValueError(f"Dataset '{hf_dataset}' must provide a train split")
+
+        if sample_limit is not None and len(train_dataset) > sample_limit:
+            train_dataset = train_dataset.select(range(sample_limit))
+
+        valid_dataset = _resolve_split("validation", "validation")
+        test_dataset = _resolve_split("test", "test")
+
+        rename_needed = label_column != "label"
+
+        def _rename_label(ds):
+            if ds is None:
+                return None
+            if rename_needed:
+                if label_column not in ds.column_names:
+                    raise ValueError(
+                        f"Label column '{label_column}' not found in split of dataset '{hf_dataset}'"
+                    )
+                ds = ds.rename_column(label_column, "label")
+            return ds
+
+        train_dataset = _rename_label(train_dataset)
+        valid_dataset = _rename_label(valid_dataset)
+        test_dataset = _rename_label(test_dataset)
+
+        # When validation/test are missing, derive them from the training split.
+        create_additional_splits = (
+            (valid_dataset is None and cfg.valid_ratio > 0)
+            or (valid_dataset is not None and len(valid_dataset) == 0 and cfg.valid_ratio > 0)
+            or (test_dataset is None and cfg.test_ratio > 0)
+            or (test_dataset is not None and len(test_dataset) == 0 and cfg.test_ratio > 0)
+        )
+
+        if create_additional_splits:
+            labels = np.array(train_dataset["label"])
+            train_idx, valid_idx, test_idx = split_indices(
+                labels,
+                cfg.train_ratio,
+                cfg.valid_ratio,
+                cfg.test_ratio,
+                cfg.seed,
+                cfg.is_stratified,
+            )
+
+            original_train = train_dataset
+            train_dataset = original_train.select(train_idx.tolist())
+            if valid_dataset is None or len(valid_dataset) == 0:
+                valid_dataset = (
+                    original_train.select(valid_idx.tolist()) if valid_idx.size else None
+                )
+            if test_dataset is None or len(test_dataset) == 0:
+                test_dataset = (
+                    original_train.select(test_idx.tolist()) if test_idx.size else None
+                )
+
+        reference_split = train_dataset or valid_dataset or test_dataset
+        if reference_split is None:
+            raise ValueError(f"Dataset '{hf_dataset}' produced no data for training")
+
+        if hf_image_column:
+            image_column = hf_image_column
+        else:
+            image_column = None
+            for name, feature in reference_split.features.items():
+                if feature.__class__.__name__ == "Image":
+                    image_column = name
+                    break
+            if image_column is None:
+                image_column = "image"
+
+        features = reference_split.features
+        if "label" in features and hasattr(features["label"], "names"):
+            num_classes = len(features["label"].names)
+        else:
+            num_classes = len(set(reference_split["label"]))
+
+        train_dataset = train_dataset.with_transform(
+            _build_transform(model_name, image_column, augment=cfg.augment)
+        )
+        eval_transform = _build_transform(model_name, image_column, augment=False)
+
+        valid_dataset = (
+            valid_dataset.with_transform(eval_transform) if valid_dataset is not None else None
+        )
+        test_dataset = (
+            test_dataset.with_transform(eval_transform) if test_dataset is not None else None
+        )
+
+        return train_dataset, valid_dataset, test_dataset, num_classes
+
+    # Default: assume local image folder structure
     split_str = f"train[:{sample_limit}]" if sample_limit is not None else "train"
     dataset = load_dataset("imagefolder", data_dir=data_root, split=split_str)
 

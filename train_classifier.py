@@ -175,6 +175,11 @@ def train_single_classifier(
     device: Optional[str] = None,
     cfg: Optional[ClassifierConfig] = None,
     sample_limit: int | None = None,
+    hf_dataset: Optional[str] = None,
+    hf_splits: Optional[dict[str, str | None]] = None,
+    hf_label_column: Optional[str] = None,
+    hf_image_column: Optional[str] = None,
+    model_init_path: Optional[str] = None,
 ) -> Dict[str, float]:
     cfg = cfg or get_classifier_config()
     fix_randomness(cfg.seed, cfg.deterministic)
@@ -184,9 +189,14 @@ def train_single_classifier(
         model_name,
         cfg,
         sample_limit=sample_limit,
+        hf_dataset=hf_dataset,
+        hf_splits=hf_splits,
+        hf_image_column=hf_image_column,
+        hf_label_column=hf_label_column,
     )
 
-    model = _create_model(model_name, num_classes)
+    model_source = model_init_path or model_name
+    model = _create_model(model_source, num_classes)
     device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
     model.to(device)
 
@@ -222,6 +232,12 @@ def train_single_classifier(
     if test_dataset is not None and len(test_dataset) > 0:
         test_metrics = trainer.evaluate(test_dataset, metric_key_prefix="test")
 
+    best_checkpoint = getattr(trainer.state, "best_model_checkpoint", None)
+    if not best_checkpoint:
+        best_checkpoint = getattr(trainer.state, "last_model_checkpoint", None)
+    if not best_checkpoint:
+        best_checkpoint = trainer.args.output_dir
+
     summary = {
         "model": model_name,
         "train_samples": len(train_dataset),
@@ -229,6 +245,7 @@ def train_single_classifier(
         "test_loss": test_metrics.get("test_loss", math.nan),
         "test_accuracy": test_metrics.get("test_accuracy", math.nan),
         "training_time_sec": duration,
+        "best_model_checkpoint": best_checkpoint,
     }
 
     metrics_dir = Path(output_dir)
@@ -256,6 +273,7 @@ def train_all_classifiers(
     device: Optional[str] = None,
     cfg: Optional[ClassifierConfig] = None,
     skip_models: Optional[list[str]] = None,
+    pretrained_checkpoints: Optional[dict[str, str]] = None,
 ) -> Dict[str, Dict[str, float]]:
     cfg = cfg or get_classifier_config()
     results: Dict[str, Dict[str, float]] = {}
@@ -269,16 +287,62 @@ def train_all_classifiers(
         print("=" * 80)
         print(f"Training classifier: {model_name}")
         print("=" * 80)
+        init_path = None
+        if pretrained_checkpoints:
+            init_path = pretrained_checkpoints.get(model_name)
         results[model_name] = train_single_classifier(
             data_root=data_root,
             model_name=model_name,
             output_dir=output_dir,
             device=device,
             cfg=cfg,
+            model_init_path=init_path,
         )
     return results
 
-__all__ = ["train_single_classifier", "train_all_classifiers"]
+
+def pretrain_classifiers(
+    dataset_name: str,
+    output_dir: str | Path = "checkpoints/pretrain",
+    device: Optional[str] = None,
+    cfg: Optional[ClassifierConfig] = None,
+    skip_models: Optional[list[str]] = None,
+) -> Dict[str, Dict[str, float]]:
+    cfg = cfg or get_classifier_config()
+
+    if not dataset_name:
+        raise ValueError("Pretraining dataset name must be provided")
+
+    results: Dict[str, Dict[str, float]] = {}
+    skip_set = set(skip_models or [])
+
+    for model_name in cfg.model_names:
+        if model_name in skip_set:
+            print(f"Skipping pretraining for classifier: {model_name}")
+            continue
+        print("=" * 80)
+        print(f"Pretraining classifier on {dataset_name}: {model_name}")
+        print("=" * 80)
+        results[model_name] = train_single_classifier(
+            data_root=dataset_name,
+            model_name=model_name,
+            output_dir=output_dir,
+            device=device,
+            cfg=cfg,
+            sample_limit=cfg.pretrain_sample_limit,
+            hf_dataset=dataset_name,
+            hf_splits={
+                "train": cfg.pretrain_train_split,
+                "validation": cfg.pretrain_valid_split,
+                "test": cfg.pretrain_test_split,
+            },
+            hf_label_column=cfg.pretrain_label_column,
+            hf_image_column=cfg.pretrain_image_column,
+        )
+
+    return results
+
+__all__ = ["train_single_classifier", "train_all_classifiers", "pretrain_classifiers"]
 
 
 if __name__ == "__main__":
@@ -288,11 +352,29 @@ if __name__ == "__main__":
     dataset_list = get_dataset_list()
     dataset_list = list(map(lambda x : x.split('/')[1], dataset_list))
 
+    pretrained_map: Dict[str, str] = {}
+
+    if cfg.pretrain_enabled and cfg.pretrain_dataset:
+        pretrain_dir = Path(cfg.pretrain_output_dir or "checkpoints/pretrain")
+        pretrain_dir.mkdir(parents=True, exist_ok=True)
+        pretrain_results = pretrain_classifiers(
+            dataset_name=cfg.pretrain_dataset,
+            output_dir=pretrain_dir,
+            device=None,
+            cfg=cfg,
+            skip_models=None,
+        )
+        for name, summary in pretrain_results.items():
+            checkpoint = summary.get("best_model_checkpoint")
+            if checkpoint:
+                pretrained_map[name] = checkpoint
+
     for data in dataset_list[:-1]:
         train_all_classifiers(
             data_root=f'private/{data}',
             output_dir=f'checkpoints/{data}',
             device=None,
             cfg=cfg,
-            skip_models=None
+            skip_models=None,
+            pretrained_checkpoints=pretrained_map,
         )

@@ -1,8 +1,8 @@
 [classifier]
 
 model_list = [
-    'timm/vgg11.tv_in1k', 
-    'microsoft/resnet-18', 
+    'timm/vgg16.tv_in1k', 
+    'microsoft/resnet-152', 
     'minchul/cvlface_adaface_ir50_ms1mv2'
     ]
 
@@ -33,5 +33,15 @@ deterministic = true
 transform_mean = [0.485, 0.456, 0.406]
 transform_std = [0.229, 0.224, 0.225]
 augment = true
+
+[classifier.pretrain]
+enabled = true
+dataset = "flwrlabs/celeba"
+train_split = "train"
+valid_split = "validation"
+test_split = "test"
+label_column = "label"
+image_column = "image"
+output_dir = "checkpoints/pretrain"
 
 [generator]
