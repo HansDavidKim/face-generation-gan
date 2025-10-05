@@ -106,8 +106,16 @@ def _create_training_arguments(
         kwargs["metric_for_best_model"] = "loss"
     if "greater_is_better" in signature.parameters:
         kwargs["greater_is_better"] = False
+
+    # === pretrain 여부에 따라 로깅 전략 분기 ===
+    is_pretrain = "pretrain" in str(output_dir).lower()
     if "logging_strategy" in signature.parameters:
-        kwargs["logging_strategy"] = "epoch"
+        kwargs["logging_strategy"] = "steps" if is_pretrain else "epoch"
+    if "logging_steps" in signature.parameters:
+        kwargs["logging_steps"] = 10 if is_pretrain else 500
+    if "logging_first_step" in signature.parameters:
+        kwargs["logging_first_step"] = True if is_pretrain else False
+
     if "report_to" in signature.parameters:
         kwargs["report_to"] = report_to
     if run_name and "run_name" in signature.parameters:
@@ -119,7 +127,6 @@ def _create_training_arguments(
     if "save_steps" in signature.parameters and "save_strategy" not in kwargs:
         kwargs["save_steps"] = 1_000_000  # effectively disable frequent saves
 
-    # tqdm 활성화 (기존: True → False)
     if "disable_tqdm" in signature.parameters:
         kwargs["disable_tqdm"] = False
 
