@@ -415,6 +415,7 @@ def _apply_transform_map(
         batch_size=64,
         desc=desc,
         remove_columns=remove_columns,
+        num_proc=8,
     )
     mapped.set_format(type="torch", columns=["pixel_values", "labels"])
     return mapped
