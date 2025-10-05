@@ -157,18 +157,31 @@ def build_hf_datasets(
         dataset_dict = load_dataset(hf_dataset)
         hf_splits = hf_splits or {}
 
-        def _resolve_split(key: str, default: str | None = None):
-            name = hf_splits.get(key, default) if hf_splits else default
-            if not name:
-                return None
-            if name not in dataset_dict:
-                print(f"Warning: split '{name}' not found in dataset '{hf_dataset}'; skipping")
-                return None
-            return dataset_dict[name]
+        def _resolve_split(
+            key: str,
+            default: str | None = None,
+            alternatives: tuple[str, ...] = (),
+        ):
+            # priority: explicit mapping → default → alternatives
+            if hf_splits and key in hf_splits and hf_splits[key]:
+                candidates = (hf_splits[key],)
+            else:
+                base = (default,) if default else ()
+                candidates = base + alternatives
+
+            for name in candidates:
+                if not name:
+                    continue
+                if name in dataset_dict:
+                    return dataset_dict[name]
+                print(
+                    f"Warning: split '{name}' not found in dataset '{hf_dataset}'; trying next option"
+                )
+            return None
 
         train_dataset = _resolve_split("train", "train")
-        valid_dataset = _resolve_split("validation", None)
-        test_dataset = _resolve_split("test", None)
+        valid_dataset = _resolve_split("validation", "validation", ("valid",))
+        test_dataset = _resolve_split("test", "test", ())
 
         reference_split = train_dataset or valid_dataset or test_dataset
         if reference_split is None:
