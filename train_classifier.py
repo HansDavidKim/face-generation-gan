@@ -369,7 +369,7 @@ if __name__ == "__main__":
     from utils.helper import get_dataset_list
     dataset_list = get_dataset_list()
     dataset_list = list(map(lambda x: x.split('/')[1], dataset_list))
-
+    '''
     pretrained_map: Dict[str, str] = {}
 
     if cfg.pretrain_enabled and cfg.pretrain_dataset:
@@ -386,7 +386,7 @@ if __name__ == "__main__":
             checkpoint = summary.get("best_model_checkpoint")
             if checkpoint:
                 pretrained_map[name] = checkpoint
-
+    '''
     for data in dataset_list[:-1]:
         train_all_classifiers(
             data_root=f'private/{data}',
