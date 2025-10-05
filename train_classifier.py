@@ -16,7 +16,10 @@ from transformers import (
     EarlyStoppingCallback,
     Trainer,
     TrainingArguments,
+    TrainerCallback,
 )
+
+from tqdm.auto import tqdm
 
 from config import ClassifierConfig, get_classifier_config
 from utils.data_loader import build_hf_datasets
@@ -118,6 +121,8 @@ def _create_training_arguments(
         kwargs["remove_unused_columns"] = False
     if "save_steps" in signature.parameters and "save_strategy" not in kwargs:
         kwargs["save_steps"] = 1_000_000  # effectively disable frequent saves
+    if "disable_tqdm" in signature.parameters:
+        kwargs["disable_tqdm"] = True
 
     return TrainingArguments(**kwargs)
 
@@ -180,6 +185,7 @@ def train_single_classifier(
     hf_label_column: Optional[str] = None,
     hf_image_column: Optional[str] = None,
     model_init_path: Optional[str] = None,
+    progress_description: Optional[str] = None,
 ) -> Dict[str, float]:
     cfg = cfg or get_classifier_config()
     fix_randomness(cfg.seed, cfg.deterministic)
@@ -215,6 +221,9 @@ def train_single_classifier(
     callbacks: list = []
     if has_validation and cfg.early_stopping:
         callbacks.append(EarlyStoppingCallback(early_stopping_patience=cfg.patience))
+
+    progress_label = progress_description or f"Training {model_name}"
+    callbacks.append(_ProgressBarCallback(progress_label))
 
     trainer = Trainer(
         model=model,
@@ -303,6 +312,7 @@ def train_all_classifiers(
             device=device,
             cfg=cfg,
             model_init_path=init_path,
+            progress_description=f"Fine-tuning {model_name} ({idx}/{total_models})",
         )
     return results
 
@@ -349,6 +359,7 @@ def pretrain_classifiers(
             },
             hf_label_column=cfg.pretrain_label_column,
             hf_image_column=cfg.pretrain_image_column,
+            progress_description=f"Pretraining {model_name} ({idx}/{total_models})",
         )
 
     return results
@@ -390,3 +401,35 @@ if __name__ == "__main__":
             skip_models=None,
             pretrained_checkpoints=pretrained_map,
         )
+class _ProgressBarCallback(TrainerCallback):
+    def __init__(self, description: str):
+        self.description = description
+        self._pbar: Optional[tqdm] = None
+        self._last_step: int = 0
+
+    def on_train_begin(self, args, state, control, **kwargs):  # type: ignore[override]
+        total = state.max_steps if state.max_steps and state.max_steps > 0 else None
+        self._pbar = tqdm(total=total, desc=self.description, leave=True, dynamic_ncols=True)
+        self._last_step = 0
+
+    def on_step_end(self, args, state, control, **kwargs):  # type: ignore[override]
+        if not self._pbar:
+            return
+        step = state.global_step or 0
+        delta = step - self._last_step
+        if delta > 0:
+            self._pbar.update(delta)
+            self._last_step = step
+
+    def on_log(self, args, state, control, logs=None, **kwargs):  # type: ignore[override]
+        if not self._pbar or not logs:
+            return
+        if "loss" in logs:
+            self._pbar.set_postfix(loss=f"{logs['loss']:.4f}")
+        elif "eval_loss" in logs:
+            self._pbar.set_postfix(eval_loss=f"{logs['eval_loss']:.4f}")
+
+    def on_train_end(self, args, state, control, **kwargs):  # type: ignore[override]
+        if self._pbar:
+            self._pbar.close()
+            self._pbar = None
