@@ -155,7 +155,8 @@ def build_hf_datasets(
             if not name:
                 return None
             if name not in dataset_dict:
-                raise ValueError(f"Split '{name}' not found in dataset '{hf_dataset}'")
+                print(f"Warning: split '{name}' not found in dataset '{hf_dataset}'; skipping")
+                return None
             return dataset_dict[name]
 
         train_dataset = _resolve_split("train", "train")
