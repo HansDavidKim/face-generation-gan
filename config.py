@@ -127,16 +127,6 @@ class ClassifierConfig:
     use_trackio: bool = False
     space_name: Optional[str] = None
     upload_hf: bool = False
-    pretrain_enabled: bool = False
-    pretrain_dataset: Optional[str] = None
-    pretrain_train_split: str = "train"
-    pretrain_valid_split: Optional[str] = None
-    pretrain_test_split: Optional[str] = None
-    pretrain_image_column: Optional[str] = None
-    pretrain_label_column: str = "label"
-    pretrain_sample_limit: Optional[int] = None
-    pretrain_output_dir: Optional[str] = None
-    pretrain_downsample_size: Optional[int] = None
 
 
 def get_classifier_config() -> ClassifierConfig:
@@ -151,35 +141,6 @@ def get_classifier_config() -> ClassifierConfig:
         raise ValueError("classifier.model_list and classifier.input_size must have the same length")
 
     seed_value = cfg.get("seed", cfg.get("random_state", 42))
-
-    pretrain_cfg = cfg.get("pretrain", {}) or {}
-    if not isinstance(pretrain_cfg, dict):
-        raise ValueError("classifier.pretrain must be a table when provided in configs/train.toml")
-
-    pretrain_dataset = pretrain_cfg.get("dataset")
-    pretrain_enabled = bool(pretrain_cfg.get("enabled", bool(pretrain_dataset)))
-
-    def _optional_split(key: str) -> Optional[str]:
-        value = pretrain_cfg.get(key)
-        if value is None:
-            return None
-        value = str(value).strip()
-        return value or None
-
-    pretrain_train_split = _optional_split("train_split") or "train"
-    pretrain_valid_split = _optional_split("valid_split")
-    pretrain_test_split = _optional_split("test_split")
-    pretrain_image_column = _optional_split("image_column")
-    pretrain_label_column = _optional_split("label_column") or "label"
-
-    pretrain_sample_limit = pretrain_cfg.get("sample_limit")
-    if pretrain_sample_limit is not None:
-        pretrain_sample_limit = int(pretrain_sample_limit)
-
-    pretrain_output_dir = _optional_split("output_dir")
-    pretrain_downsample_size = pretrain_cfg.get("downsample_size")
-    if pretrain_downsample_size is not None:
-        pretrain_downsample_size = int(pretrain_downsample_size)
 
     return ClassifierConfig(
         model_names=model_names,
@@ -203,14 +164,4 @@ def get_classifier_config() -> ClassifierConfig:
         use_trackio=bool(cfg.get("use_trackio", False)),
         space_name=cfg.get("space_name"),
         upload_hf=bool(cfg.get("upload_hf", False)),
-        pretrain_enabled=pretrain_enabled,
-        pretrain_dataset=pretrain_dataset,
-        pretrain_train_split=pretrain_train_split,
-        pretrain_valid_split=pretrain_valid_split,
-        pretrain_test_split=pretrain_test_split,
-        pretrain_image_column=pretrain_image_column,
-        pretrain_label_column=pretrain_label_column,
-        pretrain_sample_limit=pretrain_sample_limit,
-        pretrain_output_dir=pretrain_output_dir,
-        pretrain_downsample_size=pretrain_downsample_size,
     )

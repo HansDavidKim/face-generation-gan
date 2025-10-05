@@ -88,12 +88,14 @@ def prepare_dataloaders(
         cfg.is_stratified,
     )
 
+    downsample_size = None
+
     train_dataset = ImageFolder(
         data_root,
         transform=get_transform(
             model_name,
             augment=cfg.augment,
-            downsample_size=cfg.pretrain_downsample_size,
+            downsample_size=downsample_size,
         ),
     )
     valid_dataset = ImageFolder(
@@ -101,7 +103,7 @@ def prepare_dataloaders(
         transform=get_transform(
             model_name,
             augment=False,
-            downsample_size=cfg.pretrain_downsample_size,
+            downsample_size=downsample_size,
         ),
     )
     test_dataset = ImageFolder(
@@ -109,7 +111,7 @@ def prepare_dataloaders(
         transform=get_transform(
             model_name,
             augment=False,
-            downsample_size=cfg.pretrain_downsample_size,
+            downsample_size=downsample_size,
         ),
     )
 
@@ -253,12 +255,12 @@ def build_hf_datasets(
         train_transform = _build_transform_pipeline(
             model_name,
             augment=cfg.augment,
-            downsample_size=cfg.pretrain_downsample_size,
+            downsample_size=None,
         )
         eval_transform = _build_transform_pipeline(
             model_name,
             augment=False,
-            downsample_size=cfg.pretrain_downsample_size,
+            downsample_size=None,
         )
 
         train_dataset = _apply_transform_map(
@@ -320,12 +322,12 @@ def build_hf_datasets(
     train_transform = _build_transform_pipeline(
         model_name,
         augment=cfg.augment,
-        downsample_size=cfg.pretrain_downsample_size,
+        downsample_size=None,
     )
     eval_transform = _build_transform_pipeline(
         model_name,
         augment=False,
-        downsample_size=cfg.pretrain_downsample_size,
+        downsample_size=None,
     )
 
     train_dataset = dataset.select(train_idx.tolist())
