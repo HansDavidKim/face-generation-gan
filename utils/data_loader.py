@@ -177,11 +177,16 @@ def build_hf_datasets(
             if ds is None:
                 return None
             if rename_needed:
-                if label_column not in ds.column_names:
-                    raise ValueError(
-                        f"Label column '{label_column}' not found in split of dataset '{hf_dataset}'"
+                if label_column in ds.column_names:
+                    ds = ds.rename_column(label_column, "label")
+                else:
+                    print(
+                        f"Warning: label column '{label_column}' missing; will derive labels from metadata"
                     )
-                ds = ds.rename_column(label_column, "label")
+            elif "label" not in ds.column_names:
+                print(
+                    "Warning: 'label' column missing; attempting to infer labels from 'identity' or class ids"
+                )
             return ds
 
         train_dataset = _rename_label(train_dataset)
@@ -230,14 +235,42 @@ def build_hf_datasets(
                 if feature.__class__.__name__ == "Image":
                     image_column = name
                     break
-            if image_column is None:
+            if image_column is None and "image" in reference_split.column_names:
                 image_column = "image"
+            elif image_column is None:
+                raise ValueError("Unable to identify image column in dataset")
 
-        features = reference_split.features
+        if "label" not in reference_split.column_names:
+            candidate_cols = [
+                col
+                for col in ("identity", "id", "class", "target")
+                if col in reference_split.column_names
+            ]
+            if candidate_cols:
+                chosen = candidate_cols[0]
+                print(
+                    f"Info: using column '{chosen}' as label for dataset '{hf_dataset}'"
+                )
+
+                def _attach_labels(ds):
+                    if ds is None:
+                        return None
+                    return ds.add_column("label", ds[chosen])
+
+                train_dataset = _attach_labels(train_dataset)
+                valid_dataset = _attach_labels(valid_dataset)
+                test_dataset = _attach_labels(test_dataset)
+            else:
+                raise ValueError(
+                    f"Dataset '{hf_dataset}' must contain a label column; none of {['label','identity','id','class','target']} found"
+                )
+
+        features = train_dataset.features
+
         if "label" in features and hasattr(features["label"], "names"):
             num_classes = len(features["label"].names)
         else:
-            num_classes = len(set(reference_split["label"]))
+            num_classes = len(set(train_dataset["label"]))
 
         train_dataset = train_dataset.with_transform(
             _build_transform(

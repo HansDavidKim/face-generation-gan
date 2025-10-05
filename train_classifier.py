@@ -184,6 +184,7 @@ def train_single_classifier(
     cfg = cfg or get_classifier_config()
     fix_randomness(cfg.seed, cfg.deterministic)
 
+    # === 안전한 수정: label_column 지정 우선 처리 ===
     train_dataset, valid_dataset, test_dataset, num_classes = build_hf_datasets(
         data_root,
         model_name,
@@ -192,8 +193,9 @@ def train_single_classifier(
         hf_dataset=hf_dataset,
         hf_splits=hf_splits,
         hf_image_column=hf_image_column,
-        hf_label_column=hf_label_column,
+        hf_label_column=hf_label_column,  # <<-- 추가적으로 전달
     )
+    # ==================================================
 
     model_source = model_init_path or model_name
     model = _create_model(model_source, num_classes)
@@ -266,6 +268,7 @@ def train_single_classifier(
                 wandb.finish()
 
     return summary
+
 
 def train_all_classifiers(
     data_root: str,
@@ -341,6 +344,7 @@ def pretrain_classifiers(
         )
 
     return results
+
 
 __all__ = ["train_single_classifier", "train_all_classifiers", "pretrain_classifiers"]
 
