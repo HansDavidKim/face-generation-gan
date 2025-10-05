@@ -198,34 +198,25 @@ def build_hf_datasets(
         # ====================================================
         # CelebA 전용 처리 (celeb_id → label)
         # ====================================================
-        if "celeb_id" in reference_split.column_names:
-            print(f"Detected CelebA dataset: using 'celeb_id' as label column")
-            def _attach_celeb_id(ds):
-                if ds is None:
-                    return None
-                return ds.add_column("label", ds["celeb_id"])
-            train_dataset = _attach_celeb_id(train_dataset)
-            valid_dataset = _attach_celeb_id(valid_dataset)
-            test_dataset = _attach_celeb_id(test_dataset)
-        else:
-            # 일반 fallback
-            candidate_labels = [label_column, "label", "identity", "id", "class", "target"]
-            label_found = None
-            for c in candidate_labels:
-                if c in (reference_split.column_names if reference_split else []):
-                    label_found = c
-                    break
-            if label_found is None:
-                raise ValueError(
-                    f"Dataset '{hf_dataset}' must contain a label column; "
-                    f"none of {candidate_labels} found. Available columns: {reference_split.column_names}"
-                )
-            if label_found != "label":
-                print(f"Info: using '{label_found}' as label column for dataset '{hf_dataset}'")
-                for name in ["train_dataset", "valid_dataset", "test_dataset"]:
-                    ds = locals().get(name)
-                    if ds is not None and label_found in ds.column_names:
-                        locals()[name] = ds.rename_column(label_found, "label")
+        candidate_labels = [label_column, "label", "identity", "id", "class", "target"]
+        label_found = None
+        for c in candidate_labels:
+            if c and c in reference_split.column_names:
+                label_found = c
+                break
+        if label_found is None:
+            raise ValueError(
+                f"Dataset '{hf_dataset}' must contain a label column; "
+                f"none of {candidate_labels} found. Available columns: {reference_split.column_names}"
+            )
+        if label_found != "label":
+            print(f"Info: using '{label_found}' as label column for dataset '{hf_dataset}'")
+            if train_dataset is not None:
+                train_dataset = train_dataset.rename_column(label_found, "label")
+            if valid_dataset is not None and label_found in valid_dataset.column_names:
+                valid_dataset = valid_dataset.rename_column(label_found, "label")
+            if test_dataset is not None and label_found in test_dataset.column_names:
+                test_dataset = test_dataset.rename_column(label_found, "label")
 
         # ====================================================
         # Image column 탐색

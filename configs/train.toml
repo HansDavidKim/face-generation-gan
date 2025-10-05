@@ -36,7 +36,7 @@ augment = true
 
 [classifier.pretrain]
 enabled = true
-dataset = "ProgramComputer/VGGFace2"
+dataset = "RichardErkhov/VGGFace2-HQ"
 train_split = "train"
 valid_split = "validation"
 test_split = "test"
