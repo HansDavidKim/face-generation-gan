@@ -20,7 +20,11 @@ def _select_transform_values(values: Any, index: int, default: Sequence[float]) 
     return default
 
 
-def get_transform(model_name: str, augment: bool | None = None) -> transforms.Compose:
+def get_transform(
+    model_name: str,
+    augment: bool | None = None,
+    downsample_size: int | None = None,
+) -> transforms.Compose:
     """Construct a torchvision transform pipeline for ``model_name``."""
 
     cfg = train_config.get("classifier", {}) or {}
@@ -43,6 +47,11 @@ def get_transform(model_name: str, augment: bool | None = None) -> transforms.Co
     std = _select_transform_values(cfg.get("transform_std"), index, default=[0.5, 0.5, 0.5])
 
     transform_steps = []
+
+    if downsample_size:
+        transform_steps.append(
+            transforms.Resize(downsample_size, interpolation=transforms.InterpolationMode.BICUBIC)
+        )
 
     if augment_flag:
         transform_steps.extend(

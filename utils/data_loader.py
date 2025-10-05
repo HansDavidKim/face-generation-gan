@@ -84,9 +84,30 @@ def prepare_dataloaders(
         cfg.is_stratified,
     )
 
-    train_dataset = ImageFolder(data_root, transform=get_transform(model_name, augment=cfg.augment))
-    valid_dataset = ImageFolder(data_root, transform=get_transform(model_name, augment=False))
-    test_dataset = ImageFolder(data_root, transform=get_transform(model_name, augment=False))
+    train_dataset = ImageFolder(
+        data_root,
+        transform=get_transform(
+            model_name,
+            augment=cfg.augment,
+            downsample_size=cfg.pretrain_downsample_size,
+        ),
+    )
+    valid_dataset = ImageFolder(
+        data_root,
+        transform=get_transform(
+            model_name,
+            augment=False,
+            downsample_size=cfg.pretrain_downsample_size,
+        ),
+    )
+    test_dataset = ImageFolder(
+        data_root,
+        transform=get_transform(
+            model_name,
+            augment=False,
+            downsample_size=cfg.pretrain_downsample_size,
+        ),
+    )
 
     train_loader = DataLoader(
         Subset(train_dataset, train_idx.tolist()),
@@ -144,8 +165,10 @@ def build_hf_datasets(
         if sample_limit is not None and len(train_dataset) > sample_limit:
             train_dataset = train_dataset.select(range(sample_limit))
 
-        valid_dataset = _resolve_split("validation", "validation")
+        valid_dataset = _resolve_split("validation", None)
         test_dataset = _resolve_split("test", "test")
+        if valid_dataset is None and test_dataset is not None:
+            valid_dataset = test_dataset
 
         rename_needed = label_column != "label"
 
@@ -216,9 +239,19 @@ def build_hf_datasets(
             num_classes = len(set(reference_split["label"]))
 
         train_dataset = train_dataset.with_transform(
-            _build_transform(model_name, image_column, augment=cfg.augment)
+            _build_transform(
+                model_name,
+                image_column,
+                augment=cfg.augment,
+                downsample_size=cfg.pretrain_downsample_size,
+            )
         )
-        eval_transform = _build_transform(model_name, image_column, augment=False)
+        eval_transform = _build_transform(
+            model_name,
+            image_column,
+            augment=False,
+            downsample_size=cfg.pretrain_downsample_size,
+        )
 
         valid_dataset = (
             valid_dataset.with_transform(eval_transform) if valid_dataset is not None else None
@@ -252,9 +285,19 @@ def build_hf_datasets(
     )
 
     train_dataset = dataset.select(train_idx.tolist()).with_transform(
-        _build_transform(model_name, image_column, augment=cfg.augment)
+        _build_transform(
+            model_name,
+            image_column,
+            augment=cfg.augment,
+            downsample_size=cfg.pretrain_downsample_size,
+        )
     )
-    eval_transform = _build_transform(model_name, image_column, augment=False)
+    eval_transform = _build_transform(
+        model_name,
+        image_column,
+        augment=False,
+        downsample_size=cfg.pretrain_downsample_size,
+    )
 
     valid_dataset = (
         dataset.select(valid_idx.tolist()).with_transform(eval_transform)
@@ -271,8 +314,13 @@ def build_hf_datasets(
     return train_dataset, valid_dataset, test_dataset, num_classes
 
 
-def _build_transform(model_name: str, image_column: str, augment: bool) -> callable:
-    transform = get_transform(model_name, augment=augment)
+def _build_transform(
+    model_name: str,
+    image_column: str,
+    augment: bool,
+    downsample_size: int | None = None,
+) -> callable:
+    transform = get_transform(model_name, augment=augment, downsample_size=downsample_size)
 
     def _apply(batch):
         images_raw = batch.get(image_column)

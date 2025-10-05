@@ -136,6 +136,7 @@ class ClassifierConfig:
     pretrain_label_column: str = "label"
     pretrain_sample_limit: Optional[int] = None
     pretrain_output_dir: Optional[str] = None
+    pretrain_downsample_size: Optional[int] = None
 
 
 def get_classifier_config() -> ClassifierConfig:
@@ -176,6 +177,9 @@ def get_classifier_config() -> ClassifierConfig:
         pretrain_sample_limit = int(pretrain_sample_limit)
 
     pretrain_output_dir = _optional_split("output_dir")
+    pretrain_downsample_size = pretrain_cfg.get("downsample_size")
+    if pretrain_downsample_size is not None:
+        pretrain_downsample_size = int(pretrain_downsample_size)
 
     return ClassifierConfig(
         model_names=model_names,
@@ -208,4 +212,5 @@ def get_classifier_config() -> ClassifierConfig:
         pretrain_label_column=pretrain_label_column,
         pretrain_sample_limit=pretrain_sample_limit,
         pretrain_output_dir=pretrain_output_dir,
+        pretrain_downsample_size=pretrain_downsample_size,
     )
