@@ -56,6 +56,10 @@ def get_transform(model_name: str, augment: bool | None = None) -> transforms.Co
                     p=0.6,
                 ),
                 transforms.RandomApply(
+                    [transforms.RandomGrayscale(p=1.0)],
+                    p=0.15,
+                ),
+                transforms.RandomApply(
                     [transforms.RandomRotation(degrees=15)],
                     p=0.7,
                 ),
@@ -66,6 +70,18 @@ def get_transform(model_name: str, augment: bool | None = None) -> transforms.Co
                 transforms.RandomApply(
                     [transforms.GaussianBlur(kernel_size=3, sigma=(0.1, 1.5))],
                     p=0.25,
+                ),
+                transforms.RandomApply(
+                    [transforms.RandomAutocontrast()],
+                    p=0.25,
+                ),
+                transforms.RandomApply(
+                    [transforms.RandomEqualize()],
+                    p=0.1,
+                ),
+                transforms.RandomApply(
+                    [transforms.RandomSolarize(threshold=128)],
+                    p=0.1,
                 ),
                 transforms.ToTensor(),
                 transforms.RandomErasing(p=0.3, scale=(0.02, 0.15), ratio=(0.3, 3.3), value="random"),
