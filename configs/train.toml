@@ -1,13 +1,13 @@
 [classifier]
 
 model_list = [
-    'google/mobilenet_v2_1.0_224',
-    'timm/vgg16.tv_in1k', 
-    'microsoft/resnet-152', 
+    'py-feat/mobilefacenet',
+    'timm/vgg1.tv_in1k', 
+    'microsoft/resnet-18', 
     'minchul/cvlface_adaface_ir50_ms1mv2'
     ]
 
-input_size = [224, 224, 224, 112]
+input_size = [64, 224, 224, 112]
 
 optimizer = 'SGD'
 learning_rate = 5e-5
