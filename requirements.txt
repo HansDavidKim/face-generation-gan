@@ -11,3 +11,6 @@ datasets
 huggingface-hub
 transformers
 accelerate
+insightface
+onnxruntime-gpu
+opencv-python-headless
