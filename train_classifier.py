@@ -1,4 +1,4 @@
-"""Classifier training using Hugging Face Trainer or manual loop (for pretrain)."""
+"""Classifier training using Hugging Face Trainer."""
 
 from __future__ import annotations
 
@@ -18,8 +18,6 @@ from transformers import (
     TrainingArguments,
     TrainerCallback,
 )
-
-from tqdm.auto import tqdm
 
 from config import ClassifierConfig, get_classifier_config
 from utils.data_loader import build_hf_datasets
@@ -59,6 +57,9 @@ def _create_training_arguments(
     cfg: ClassifierConfig,
     evaluation: bool,
     dataset_name: str | None = None,
+    log_strategy: str = "epoch",
+    log_steps: int | None = None,
+    log_first_step: bool = False,
 ) -> TrainingArguments:
     run_dir = output_dir / _sanitize_model_name(model_name)
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -106,15 +107,12 @@ def _create_training_arguments(
         kwargs["metric_for_best_model"] = "loss"
     if "greater_is_better" in signature.parameters:
         kwargs["greater_is_better"] = False
-
-    # Fine-tune은 epoch 단위, pretrain은 steps 단위
-    is_pretrain = "pretrain" in str(output_dir).lower()
     if "logging_strategy" in signature.parameters:
-        kwargs["logging_strategy"] = "steps" if is_pretrain else "epoch"
-    if "logging_steps" in signature.parameters:
-        kwargs["logging_steps"] = 10 if is_pretrain else 500
+        kwargs["logging_strategy"] = log_strategy
+    if log_steps is not None and "logging_steps" in signature.parameters:
+        kwargs["logging_steps"] = max(1, log_steps)
     if "logging_first_step" in signature.parameters:
-        kwargs["logging_first_step"] = True if is_pretrain else False
+        kwargs["logging_first_step"] = log_first_step
 
     if "report_to" in signature.parameters:
         kwargs["report_to"] = report_to
@@ -126,9 +124,6 @@ def _create_training_arguments(
         kwargs["remove_unused_columns"] = False
     if "save_steps" in signature.parameters and "save_strategy" not in kwargs:
         kwargs["save_steps"] = 1_000_000
-
-    if "disable_tqdm" in signature.parameters:
-        kwargs["disable_tqdm"] = False
 
     return TrainingArguments(**kwargs)
 
@@ -191,7 +186,6 @@ def train_single_classifier(
     hf_label_column: Optional[str] = None,
     hf_image_column: Optional[str] = None,
     model_init_path: Optional[str] = None,
-    progress_description: Optional[str] = None,
 ) -> Dict[str, float]:
     cfg = cfg or get_classifier_config()
     fix_randomness(cfg.seed, cfg.deterministic)
@@ -213,61 +207,25 @@ def train_single_classifier(
     model.to(device)
 
     dataset_name = _infer_dataset_name(data_root)
-    is_pretrain = "pretrain" in str(output_dir).lower()
 
-    # ======================================================
-    # === Manual tqdm-based loop for pretraining ============
-    # ======================================================
-    if is_pretrain:
-        from torch.utils.data import DataLoader
-        from torch.optim import AdamW
-        from tqdm.auto import tqdm
-
-        train_loader = DataLoader(train_dataset, batch_size=cfg.batch_size, shuffle=True)
-        optimizer = AdamW(model.parameters(), lr=cfg.learning_rate)
-        loss_fn = torch.nn.CrossEntropyLoss()
-
-        print(f"[Manual Pretrain Loop] {model_name} — {len(train_loader)} batches/epoch")
-
-        model.train()
-        total_epochs = cfg.epochs
-        for epoch in range(total_epochs):
-            epoch_loss = 0.0
-            pbar = tqdm(train_loader, desc=f"Pretrain {model_name} | Epoch {epoch+1}/{total_epochs}", ncols=120)
-            for batch in pbar:
-                images, labels = batch["pixel_values"].to(device), batch["labels"].to(device)
-                outputs = model(images).logits
-                loss = loss_fn(outputs, labels)
-
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
-
-                epoch_loss += loss.item()
-                pbar.set_postfix(loss=f"{loss.item():.4f}")
-
-            avg_loss = epoch_loss / len(train_loader)
-            print(f"Epoch {epoch+1}/{total_epochs} — avg_loss={avg_loss:.4f}")
-
-        return {"model": model_name, "status": "pretrain_done"}
-
-    # ======================================================
-    # === Hugging Face Trainer for fine-tuning =============
-    # ======================================================
     has_validation = valid_dataset is not None and len(valid_dataset) > 0
+    is_pretrain_run = hf_dataset is not None
     training_args = _create_training_arguments(
         model_name,
         Path(output_dir),
         cfg,
         evaluation=has_validation,
         dataset_name=dataset_name,
+        log_strategy="steps" if is_pretrain_run else "epoch",
+        log_steps=cfg.log_steps if is_pretrain_run else None,
+        log_first_step=is_pretrain_run,
     )
 
-    callbacks: list = []
+    callbacks: list[TrainerCallback] = []
     if has_validation and cfg.early_stopping:
         callbacks.append(EarlyStoppingCallback(early_stopping_patience=cfg.patience))
-    progress_label = progress_description or f"Fine-tuning {model_name}"
-    callbacks.append(_ProgressBarCallback(progress_label))
+    if is_pretrain_run:
+        callbacks.append(_ConsoleLoggingCallback(model_name))
 
     trainer = Trainer(
         model=model,
@@ -349,7 +307,6 @@ def train_all_classifiers(
             device=device,
             cfg=cfg,
             model_init_path=init_path,
-            progress_description=f"Fine-tuning {model_name} ({idx}/{total_models})",
         )
     return results
 
@@ -396,44 +353,58 @@ def pretrain_classifiers(
             },
             hf_label_column=cfg.pretrain_label_column,
             hf_image_column=cfg.pretrain_image_column,
-            progress_description=f"Pretraining {model_name} ({idx}/{total_models})",
         )
 
     return results
 
 
-class _ProgressBarCallback(TrainerCallback):
-    def __init__(self, description: str):
-        self.description = description
-        self._pbar: Optional[tqdm] = None
-        self._last_step: int = 0
+class _ConsoleLoggingCallback(TrainerCallback):
+    """Console logger for step-level and evaluation metrics."""
 
-    def on_train_begin(self, args, state, control, **kwargs):
-        total = state.max_steps if state.max_steps and state.max_steps > 0 else None
-        self._pbar = tqdm(total=total, desc=self.description, leave=True, dynamic_ncols=True)
-        self._last_step = 0
+    def __init__(self, label: str) -> None:
+        self.label = label
 
-    def on_step_end(self, args, state, control, **kwargs):
-        if not self._pbar:
+    @staticmethod
+    def _is_main_process(args, state) -> bool:
+        if hasattr(state, "is_world_process_zero"):
+            return bool(state.is_world_process_zero)
+        return getattr(args, "process_index", 0) == 0
+
+    def on_log(self, args, state, control, logs=None, **kwargs):  # type: ignore[override]
+        if not logs or not self._is_main_process(args, state):
             return
-        step = state.global_step or 0
-        delta = step - self._last_step
-        if delta > 0:
-            self._pbar.update(delta)
-            self._last_step = step
 
-    def on_log(self, args, state, control, logs=None, **kwargs):
-        if not self._pbar or not logs:
-            return
+        step = logs.get("step", state.global_step)
+        epoch = logs.get("epoch", state.epoch)
+
+        parts = [f"[{self.label}]", f"step={step}"]
+        if epoch is not None:
+            parts.append(f"epoch={epoch:.2f}")
         if "loss" in logs:
-            self._pbar.set_postfix(loss=f"{logs['loss']:.4f}")
-        elif "eval_loss" in logs:
-            self._pbar.set_postfix(eval_loss=f"{logs['eval_loss']:.4f}")
+            parts.append(f"loss={logs['loss']:.4f}")
+        if "learning_rate" in logs:
+            parts.append(f"lr={logs['learning_rate']:.2e}")
 
-    def on_train_end(self, args, state, control, **kwargs):
-        if self._pbar:
-            self._pbar.close()
-            self._pbar = None
+        print(" | ".join(parts), flush=True)
+
+    def on_evaluate(self, args, state, control, metrics=None, **kwargs):  # type: ignore[override]
+        if not metrics or not self._is_main_process(args, state):
+            return
+
+        parts = [f"[{self.label}] eval"]
+        if "eval_loss" in metrics:
+            parts.append(f"loss={metrics['eval_loss']:.4f}")
+        if "eval_accuracy" in metrics:
+            parts.append(f"acc={metrics['eval_accuracy']:.4f}")
+        if "eval_f1" in metrics:
+            parts.append(f"f1={metrics['eval_f1']:.4f}")
+
+        print(" | ".join(parts), flush=True)
+
+    def on_train_end(self, args, state, control, **kwargs):  # type: ignore[override]
+        if not self._is_main_process(args, state):
+            return
+        print(f"[{self.label}] training complete", flush=True)
 
 
 if __name__ == "__main__":

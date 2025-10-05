@@ -114,6 +114,7 @@ class ClassifierConfig:
     weight_decay: float
     batch_size: int
     epochs: int
+    log_steps: int
     train_ratio: float
     valid_ratio: float
     test_ratio: float
@@ -190,6 +191,7 @@ def get_classifier_config() -> ClassifierConfig:
         weight_decay=float(cfg.get("weight_decay", 0.0)),
         batch_size=int(cfg.get("batch_size", 32)),
         epochs=int(cfg.get("epoch", 1)),
+        log_steps=int(cfg.get("log_steps", 10)),
         train_ratio=float(cfg.get("train_ratio", 0.8)),
         valid_ratio=float(cfg.get("valid_ratio", 0.1)),
         test_ratio=float(cfg.get("test_ratio", 0.1)),
