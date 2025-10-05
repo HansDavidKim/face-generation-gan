@@ -55,23 +55,28 @@ def _create_training_arguments(
     output_dir: Path,
     cfg: ClassifierConfig,
     evaluation: bool,
+    dataset_name: str | None = None,
 ) -> TrainingArguments:
     run_dir = output_dir / _sanitize_model_name(model_name)
     run_dir.mkdir(parents=True, exist_ok=True)
 
     if evaluation:
         eval_strategy = "epoch"
-        save_strategy = "epoch"
     else:
         eval_strategy = "no"
-        save_strategy = "no"
+    save_strategy = "epoch"
 
     report_to: list[str] = []
     run_name: Optional[str] = None
     if cfg.use_wandb:
         if ensure_wandb_login():
             report_to = ["wandb"]
-            run_name = _sanitize_model_name(model_name)
+            sanitized_model = _sanitize_model_name(model_name)
+            if dataset_name:
+                sanitized_dataset = _sanitize_model_name(dataset_name)
+                run_name = f"{sanitized_dataset}__{sanitized_model}"
+            else:
+                run_name = sanitized_model
         else:
             print("wandb setup failed; disabling wandb logging.")
 
@@ -96,7 +101,7 @@ def _create_training_arguments(
     if "save_strategy" in signature.parameters:
         kwargs["save_strategy"] = save_strategy
     if "load_best_model_at_end" in signature.parameters:
-        kwargs["load_best_model_at_end"] = False
+        kwargs["load_best_model_at_end"] = evaluation
     if "metric_for_best_model" in signature.parameters:
         kwargs["metric_for_best_model"] = "loss"
     if "greater_is_better" in signature.parameters:
@@ -186,11 +191,13 @@ def train_single_classifier(
     model.to(device)
 
     has_validation = valid_dataset is not None and len(valid_dataset) > 0
+    dataset_name = _infer_dataset_name(data_root)
     training_args = _create_training_arguments(
         model_name,
         Path(output_dir),
         cfg,
         evaluation=has_validation,
+        dataset_name=dataset_name,
     )
 
     callbacks: list = []
@@ -232,6 +239,15 @@ def train_single_classifier(
 
     _maybe_push_to_hf(trainer, model_name, data_root, cfg)
 
+    if cfg.use_wandb:
+        try:
+            import wandb  # type: ignore
+        except ModuleNotFoundError:
+            pass
+        else:
+            if wandb.run is not None:
+                wandb.finish()
+
     return summary
 
 def train_all_classifiers(
@@ -244,6 +260,7 @@ def train_all_classifiers(
     cfg = cfg or get_classifier_config()
     results: Dict[str, Dict[str, float]] = {}
     skip_set = set(skip_models or [])
+    skip_set.add("google/mobilenet_v2_1.0_224")
 
     for model_name in cfg.model_names:
         if model_name in skip_set:

@@ -47,9 +47,30 @@ def get_transform(model_name: str, augment: bool | None = None) -> transforms.Co
     if augment_flag:
         transform_steps.extend(
             [
-                transforms.RandomResizedCrop(size, scale=(0.8, 1.0)),
+                transforms.RandomResizedCrop(size, scale=(0.65, 1.0), ratio=(0.85, 1.2)),
                 transforms.RandomHorizontalFlip(),
+                transforms.RandomApply(
+                    [
+                        transforms.ColorJitter(brightness=0.25, contrast=0.25, saturation=0.25, hue=0.08),
+                    ],
+                    p=0.6,
+                ),
+                transforms.RandomApply(
+                    [transforms.RandomRotation(degrees=15)],
+                    p=0.7,
+                ),
+                transforms.RandomApply(
+                    [transforms.RandomPerspective(distortion_scale=0.3, p=1.0)],
+                    p=0.35,
+                ),
+                transforms.RandomApply(
+                    [transforms.GaussianBlur(kernel_size=3, sigma=(0.1, 1.5))],
+                    p=0.25,
+                ),
             ]
+        )
+        transform_steps.append(
+            transforms.RandomErasing(p=0.3, scale=(0.02, 0.15), ratio=(0.3, 3.3), value="random")
         )
     else:
         transform_steps.extend(
