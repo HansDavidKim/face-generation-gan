@@ -1,4 +1,4 @@
-"""Classifier training using Hugging Face Trainer."""
+"""Classifier training using Hugging Face Trainer or manual loop (for pretrain)."""
 
 from __future__ import annotations
 
@@ -107,7 +107,7 @@ def _create_training_arguments(
     if "greater_is_better" in signature.parameters:
         kwargs["greater_is_better"] = False
 
-    # === pretrain 여부에 따라 로깅 전략 분기 ===
+    # Fine-tune은 epoch 단위, pretrain은 steps 단위
     is_pretrain = "pretrain" in str(output_dir).lower()
     if "logging_strategy" in signature.parameters:
         kwargs["logging_strategy"] = "steps" if is_pretrain else "epoch"
@@ -125,7 +125,7 @@ def _create_training_arguments(
     if "remove_unused_columns" in signature.parameters:
         kwargs["remove_unused_columns"] = False
     if "save_steps" in signature.parameters and "save_strategy" not in kwargs:
-        kwargs["save_steps"] = 1_000_000  # effectively disable frequent saves
+        kwargs["save_steps"] = 1_000_000
 
     if "disable_tqdm" in signature.parameters:
         kwargs["disable_tqdm"] = False
@@ -152,7 +152,7 @@ def _maybe_push_to_hf(
     repo_id = f"{username}/{repo_name}"
 
     try:
-        import huggingface_hub  # type: ignore  # noqa: F401
+        import huggingface_hub  # type: ignore
     except ModuleNotFoundError:
         print("huggingface_hub 패키지가 없어 모델 업로드를 건너뜁니다.")
         return
@@ -168,7 +168,7 @@ def _maybe_push_to_hf(
             model_name=repo_name,
         )
         print(f"모델을 Hugging Face Hub에 업로드했습니다: {repo_id}")
-    except Exception as exc:  # pragma: no cover - network/git dependent
+    except Exception as exc:
         print(f"Hugging Face 업로드 실패: {exc}")
 
 
@@ -212,8 +212,49 @@ def train_single_classifier(
     device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
     model.to(device)
 
-    has_validation = valid_dataset is not None and len(valid_dataset) > 0
     dataset_name = _infer_dataset_name(data_root)
+    is_pretrain = "pretrain" in str(output_dir).lower()
+
+    # ======================================================
+    # === Manual tqdm-based loop for pretraining ============
+    # ======================================================
+    if is_pretrain:
+        from torch.utils.data import DataLoader
+        from torch.optim import AdamW
+        from tqdm.auto import tqdm
+
+        train_loader = DataLoader(train_dataset, batch_size=cfg.batch_size, shuffle=True)
+        optimizer = AdamW(model.parameters(), lr=cfg.learning_rate)
+        loss_fn = torch.nn.CrossEntropyLoss()
+
+        print(f"[Manual Pretrain Loop] {model_name} — {len(train_loader)} batches/epoch")
+
+        model.train()
+        total_epochs = cfg.epochs
+        for epoch in range(total_epochs):
+            epoch_loss = 0.0
+            pbar = tqdm(train_loader, desc=f"Pretrain {model_name} | Epoch {epoch+1}/{total_epochs}", ncols=120)
+            for batch in pbar:
+                images, labels = batch["pixel_values"].to(device), batch["labels"].to(device)
+                outputs = model(images).logits
+                loss = loss_fn(outputs, labels)
+
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+
+                epoch_loss += loss.item()
+                pbar.set_postfix(loss=f"{loss.item():.4f}")
+
+            avg_loss = epoch_loss / len(train_loader)
+            print(f"Epoch {epoch+1}/{total_epochs} — avg_loss={avg_loss:.4f}")
+
+        return {"model": model_name, "status": "pretrain_done"}
+
+    # ======================================================
+    # === Hugging Face Trainer for fine-tuning =============
+    # ======================================================
+    has_validation = valid_dataset is not None and len(valid_dataset) > 0
     training_args = _create_training_arguments(
         model_name,
         Path(output_dir),
@@ -225,8 +266,7 @@ def train_single_classifier(
     callbacks: list = []
     if has_validation and cfg.early_stopping:
         callbacks.append(EarlyStoppingCallback(early_stopping_patience=cfg.patience))
-
-    progress_label = progress_description or f"Training {model_name}"
+    progress_label = progress_description or f"Fine-tuning {model_name}"
     callbacks.append(_ProgressBarCallback(progress_label))
 
     trainer = Trainer(
@@ -247,12 +287,6 @@ def train_single_classifier(
     if test_dataset is not None and len(test_dataset) > 0:
         test_metrics = trainer.evaluate(test_dataset, metric_key_prefix="test")
 
-    best_checkpoint = getattr(trainer.state, "best_model_checkpoint", None)
-    if not best_checkpoint:
-        best_checkpoint = getattr(trainer.state, "last_model_checkpoint", None)
-    if not best_checkpoint:
-        best_checkpoint = trainer.args.output_dir
-
     summary = {
         "model": model_name,
         "train_samples": len(train_dataset),
@@ -260,7 +294,6 @@ def train_single_classifier(
         "test_loss": test_metrics.get("test_loss", math.nan),
         "test_accuracy": test_metrics.get("test_accuracy", math.nan),
         "training_time_sec": duration,
-        "best_model_checkpoint": best_checkpoint,
     }
 
     metrics_dir = Path(output_dir)
