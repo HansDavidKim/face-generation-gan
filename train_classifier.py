@@ -11,8 +11,6 @@ from typing import Dict, Optional
 import torch
 import inspect
 
-from tqdm.auto import tqdm
-
 from transformers import (
     AutoModelForImageClassification,
     EarlyStoppingCallback,
@@ -287,13 +285,17 @@ def train_all_classifiers(
 
     models_to_run = [name for name in cfg.model_names if name not in skip_set]
 
-    for model_name in tqdm(models_to_run, desc="Finetuning classifiers", unit="model"):
+    if not models_to_run:
+        print("No classifiers scheduled for fine-tuning.")
+        return results
+
+    total_models = len(models_to_run)
+
+    for idx, model_name in enumerate(models_to_run, start=1):
         print("=" * 80)
-        print(f"Training classifier: {model_name}")
+        print(f"[Fine-tune {idx}/{total_models}] {model_name}")
         print("=" * 80)
-        init_path = None
-        if pretrained_checkpoints:
-            init_path = pretrained_checkpoints.get(model_name)
+        init_path = pretrained_checkpoints.get(model_name) if pretrained_checkpoints else None
         results[model_name] = train_single_classifier(
             data_root=data_root,
             model_name=model_name,
@@ -322,9 +324,15 @@ def pretrain_classifiers(
 
     models_to_run = [name for name in cfg.model_names if name not in skip_set]
 
-    for model_name in tqdm(models_to_run, desc="Pretraining classifiers", unit="model"):
+    if not models_to_run:
+        print("No classifiers scheduled for pretraining.")
+        return results
+
+    total_models = len(models_to_run)
+
+    for idx, model_name in enumerate(models_to_run, start=1):
         print("=" * 80)
-        print(f"Pretraining classifier on {dataset_name}: {model_name}")
+        print(f"[Pretrain {idx}/{total_models}] {model_name} on {dataset_name}")
         print("=" * 80)
         results[model_name] = train_single_classifier(
             data_root=dataset_name,
