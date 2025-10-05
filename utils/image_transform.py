@@ -67,24 +67,19 @@ def get_transform(model_name: str, augment: bool | None = None) -> transforms.Co
                     [transforms.GaussianBlur(kernel_size=3, sigma=(0.1, 1.5))],
                     p=0.25,
                 ),
+                transforms.ToTensor(),
+                transforms.RandomErasing(p=0.3, scale=(0.02, 0.15), ratio=(0.3, 3.3), value="random"),
             ]
-        )
-        transform_steps.append(
-            transforms.RandomErasing(p=0.3, scale=(0.02, 0.15), ratio=(0.3, 3.3), value="random")
         )
     else:
         transform_steps.extend(
             [
                 transforms.Resize(size),
                 transforms.CenterCrop(size),
+                transforms.ToTensor(),
             ]
         )
 
-    transform_steps.extend(
-        [
-            transforms.ToTensor(),
-            transforms.Normalize(mean=mean, std=std),
-        ]
-    )
+    transform_steps.append(transforms.Normalize(mean=mean, std=std))
 
     return transforms.Compose(transform_steps)
