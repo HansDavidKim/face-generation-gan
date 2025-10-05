@@ -14,6 +14,9 @@ from utils.helper import fix_randomness
 from utils.image_transform import get_transform
 
 
+# ============================================================
+# Split helper
+# ============================================================
 def split_indices(
     labels: np.ndarray,
     train_ratio: float,
@@ -61,6 +64,9 @@ def split_indices(
     return train_idx, valid_idx, test_idx
 
 
+# ============================================================
+# Torch Dataloader builder (local ImageFolder)
+# ============================================================
 def prepare_dataloaders(
     data_root: str,
     model_name: str,
@@ -132,6 +138,9 @@ def prepare_dataloaders(
     return train_loader, valid_loader, test_loader
 
 
+# ============================================================
+# HuggingFace dataset builder
+# ============================================================
 def build_hf_datasets(
     data_root: str,
     model_name: str,
@@ -161,47 +170,45 @@ def build_hf_datasets(
         valid_dataset = _resolve_split("validation", None)
         test_dataset = _resolve_split("test", None)
 
-        # reference split 확보
         reference_split = train_dataset or valid_dataset or test_dataset
         if reference_split is None:
             raise ValueError(f"Dataset '{hf_dataset}' produced no available split")
 
-        # validation/test가 없으면 train을 분할
-        if valid_dataset is None and test_dataset is None and len(reference_split) > 1:
-            labels_tmp = np.arange(len(reference_split))
-            train_idx, valid_idx, test_idx = split_indices(
-                labels_tmp,
-                cfg.train_ratio,
-                cfg.valid_ratio,
-                cfg.test_ratio,
-                cfg.seed,
-                False,
-            )
-            valid_dataset = reference_split.select(valid_idx.tolist()) if valid_idx.size else None
-            test_dataset = reference_split.select(test_idx.tolist()) if test_idx.size else None
+        # ====================================================
+        # CelebA 전용 처리 (celeb_id → label)
+        # ====================================================
+        if "celeb_id" in reference_split.column_names:
+            print(f"Detected CelebA dataset: using 'celeb_id' as label column")
+            def _attach_celeb_id(ds):
+                if ds is None:
+                    return None
+                return ds.add_column("label", ds["celeb_id"])
+            train_dataset = _attach_celeb_id(train_dataset)
+            valid_dataset = _attach_celeb_id(valid_dataset)
+            test_dataset = _attach_celeb_id(test_dataset)
+        else:
+            # 일반 fallback
+            candidate_labels = [label_column, "label", "identity", "id", "class", "target"]
+            label_found = None
+            for c in candidate_labels:
+                if c in (reference_split.column_names if reference_split else []):
+                    label_found = c
+                    break
+            if label_found is None:
+                raise ValueError(
+                    f"Dataset '{hf_dataset}' must contain a label column; "
+                    f"none of {candidate_labels} found. Available columns: {reference_split.column_names}"
+                )
+            if label_found != "label":
+                print(f"Info: using '{label_found}' as label column for dataset '{hf_dataset}'")
+                for name in ["train_dataset", "valid_dataset", "test_dataset"]:
+                    ds = locals().get(name)
+                    if ds is not None and label_found in ds.column_names:
+                        locals()[name] = ds.rename_column(label_found, "label")
 
-        # === Label column 자동 탐색 ===
-        candidate_labels = [label_column, "label", "identity", "id", "class", "target"]
-        label_found = None
-        for c in candidate_labels:
-            if c in reference_split.column_names:
-                label_found = c
-                break
-
-        if label_found is None:
-            raise ValueError(
-                f"Dataset '{hf_dataset}' must contain a label column; "
-                f"none of {candidate_labels} found. Available columns: {reference_split.column_names}"
-            )
-
-        if label_found != "label":
-            print(f"Info: using '{label_found}' as label column for dataset '{hf_dataset}'")
-            for name in ["train_dataset", "valid_dataset", "test_dataset"]:
-                ds = locals().get(name)
-                if ds is not None and label_found in ds.column_names:
-                    locals()[name] = ds.rename_column(label_found, "label")
-
-        # === Image column 탐색 ===
+        # ====================================================
+        # Image column 탐색
+        # ====================================================
         if hf_image_column:
             image_column = hf_image_column
         else:
@@ -215,14 +222,18 @@ def build_hf_datasets(
             elif image_column is None:
                 raise ValueError("Unable to identify image column in dataset")
 
-        # === Class 개수 ===
+        # ====================================================
+        # 클래스 개수 계산
+        # ====================================================
         features = train_dataset.features
         if "label" in features and hasattr(features["label"], "names"):
             num_classes = len(features["label"].names)
         else:
             num_classes = len(set(train_dataset["label"]))
 
-        # === Transform 적용 ===
+        # ====================================================
+        # Transform 적용
+        # ====================================================
         train_dataset = train_dataset.with_transform(
             _build_transform(
                 model_name,
@@ -247,7 +258,9 @@ def build_hf_datasets(
 
         return train_dataset, valid_dataset, test_dataset, num_classes
 
-    # === Fallback: Local image folder ===
+    # ====================================================
+    # Local ImageFolder fallback
+    # ====================================================
     split_str = f"train[:{sample_limit}]" if sample_limit is not None else "train"
     dataset = load_dataset("imagefolder", data_dir=data_root, split=split_str)
 
@@ -299,6 +312,9 @@ def build_hf_datasets(
     return train_dataset, valid_dataset, test_dataset, num_classes
 
 
+# ============================================================
+# Transform builder
+# ============================================================
 def _build_transform(
     model_name: str,
     image_column: str,
