@@ -14,7 +14,6 @@ momentum = 0.9
 weight_decay = 1e-4
 batch_size = 64
 epoch = 50
-log_steps = 50
 
 train_ratio = 0.8
 valid_ratio = 0.1

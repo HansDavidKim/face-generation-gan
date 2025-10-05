@@ -16,7 +16,6 @@ from transformers import (
     EarlyStoppingCallback,
     Trainer,
     TrainingArguments,
-    TrainerCallback,
 )
 
 from config import ClassifierConfig, get_classifier_config
@@ -38,6 +37,22 @@ def _infer_dataset_name(data_root: str) -> str:
     name = path.name or path.parent.name
     return name or "dataset"
 
+def _resolve_device(device: Optional[str]) -> torch.device:
+    """Return a CUDA device when available (or requested), otherwise fail fast."""
+
+    if device:
+        resolved = torch.device(device)
+        if resolved.type == "cuda" and not torch.cuda.is_available():
+            raise RuntimeError("CUDA was requested but no GPU is available.")
+        return resolved
+
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+
+    raise RuntimeError(
+        "CUDA device not available. Enable a GPU runtime (e.g., Colab GPU) before running training."
+    )
+
 
 def _create_model(model_name: str, num_classes: int) -> torch.nn.Module:
     model = AutoModelForImageClassification.from_pretrained(
@@ -57,9 +72,6 @@ def _create_training_arguments(
     cfg: ClassifierConfig,
     evaluation: bool,
     dataset_name: str | None = None,
-    log_strategy: str = "epoch",
-    log_steps: int | None = None,
-    log_first_step: bool = False,
 ) -> TrainingArguments:
     run_dir = output_dir / _sanitize_model_name(model_name)
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -108,11 +120,7 @@ def _create_training_arguments(
     if "greater_is_better" in signature.parameters:
         kwargs["greater_is_better"] = False
     if "logging_strategy" in signature.parameters:
-        kwargs["logging_strategy"] = log_strategy
-    if log_steps is not None and "logging_steps" in signature.parameters:
-        kwargs["logging_steps"] = max(1, log_steps)
-    if "logging_first_step" in signature.parameters:
-        kwargs["logging_first_step"] = log_first_step
+        kwargs["logging_strategy"] = "epoch"
 
     if "report_to" in signature.parameters:
         kwargs["report_to"] = report_to
@@ -203,29 +211,26 @@ def train_single_classifier(
 
     model_source = model_init_path or model_name
     model = _create_model(model_source, num_classes)
-    device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
+    torch_device = _resolve_device(device)
+    if torch_device.type == "cuda":
+        torch.backends.cudnn.benchmark = True
+    model.to(torch_device)
     model.to(device)
 
     dataset_name = _infer_dataset_name(data_root)
 
     has_validation = valid_dataset is not None and len(valid_dataset) > 0
-    is_pretrain_run = hf_dataset is not None
     training_args = _create_training_arguments(
         model_name,
         Path(output_dir),
         cfg,
         evaluation=has_validation,
         dataset_name=dataset_name,
-        log_strategy="steps" if is_pretrain_run else "epoch",
-        log_steps=cfg.log_steps if is_pretrain_run else None,
-        log_first_step=is_pretrain_run,
     )
 
-    callbacks: list[TrainerCallback] = []
+    callbacks: list = []
     if has_validation and cfg.early_stopping:
         callbacks.append(EarlyStoppingCallback(early_stopping_patience=cfg.patience))
-    if is_pretrain_run:
-        callbacks.append(_ConsoleLoggingCallback(model_name))
 
     trainer = Trainer(
         model=model,
@@ -356,55 +361,6 @@ def pretrain_classifiers(
         )
 
     return results
-
-
-class _ConsoleLoggingCallback(TrainerCallback):
-    """Console logger for step-level and evaluation metrics."""
-
-    def __init__(self, label: str) -> None:
-        self.label = label
-
-    @staticmethod
-    def _is_main_process(args, state) -> bool:
-        if hasattr(state, "is_world_process_zero"):
-            return bool(state.is_world_process_zero)
-        return getattr(args, "process_index", 0) == 0
-
-    def on_log(self, args, state, control, logs=None, **kwargs):  # type: ignore[override]
-        if not logs or not self._is_main_process(args, state):
-            return
-
-        step = logs.get("step", state.global_step)
-        epoch = logs.get("epoch", state.epoch)
-
-        parts = [f"[{self.label}]", f"step={step}"]
-        if epoch is not None:
-            parts.append(f"epoch={epoch:.2f}")
-        if "loss" in logs:
-            parts.append(f"loss={logs['loss']:.4f}")
-        if "learning_rate" in logs:
-            parts.append(f"lr={logs['learning_rate']:.2e}")
-
-        print(" | ".join(parts), flush=True)
-
-    def on_evaluate(self, args, state, control, metrics=None, **kwargs):  # type: ignore[override]
-        if not metrics or not self._is_main_process(args, state):
-            return
-
-        parts = [f"[{self.label}] eval"]
-        if "eval_loss" in metrics:
-            parts.append(f"loss={metrics['eval_loss']:.4f}")
-        if "eval_accuracy" in metrics:
-            parts.append(f"acc={metrics['eval_accuracy']:.4f}")
-        if "eval_f1" in metrics:
-            parts.append(f"f1={metrics['eval_f1']:.4f}")
-
-        print(" | ".join(parts), flush=True)
-
-    def on_train_end(self, args, state, control, **kwargs):  # type: ignore[override]
-        if not self._is_main_process(args, state):
-            return
-        print(f"[{self.label}] training complete", flush=True)
 
 
 if __name__ == "__main__":
