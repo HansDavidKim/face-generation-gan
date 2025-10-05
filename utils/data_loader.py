@@ -156,7 +156,7 @@ def build_hf_datasets(
     label_column = hf_label_column or "label"
 
     if hf_dataset:
-        dataset_dict = load_dataset(hf_dataset)
+        dataset_dict = load_dataset(hf_dataset, trust_remote_code=True)
         hf_splits = hf_splits or {}
 
         def _resolve_split(
