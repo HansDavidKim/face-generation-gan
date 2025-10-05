@@ -105,6 +105,6 @@ def get_transform(
             ]
         )
 
-    #transform_steps.append(transforms.Normalize(mean=mean, std=std))
+    transform_steps.append(transforms.Normalize(mean=mean, std=std))
 
     return transforms.Compose(transform_steps)

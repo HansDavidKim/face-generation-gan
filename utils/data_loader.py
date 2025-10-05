@@ -188,6 +188,9 @@ def build_hf_datasets(
         valid_dataset = _resolve_split("validation", "validation", ("valid",))
         test_dataset = _resolve_split("test", "test", ())
 
+        if sample_limit is not None and train_dataset is not None and len(train_dataset) > sample_limit:
+            train_dataset = train_dataset.select(range(sample_limit))
+
         reference_split = train_dataset or valid_dataset or test_dataset
         if reference_split is None:
             raise ValueError(f"Dataset '{hf_dataset}' produced no available split")
@@ -329,6 +332,9 @@ def build_hf_datasets(
         augment=False,
         downsample_size=None,
     )
+
+    if sample_limit is not None and sample_limit < len(train_idx):
+        train_idx = train_idx[:sample_limit]
 
     train_dataset = dataset.select(train_idx.tolist())
     valid_dataset = dataset.select(valid_idx.tolist()) if valid_idx.size else None

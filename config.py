@@ -127,6 +127,15 @@ class ClassifierConfig:
     use_trackio: bool = False
     space_name: Optional[str] = None
     upload_hf: bool = False
+    pretrain_enabled: bool = False
+    pretrain_dataset: Optional[str] = None
+    pretrain_train_split: str = "train"
+    pretrain_valid_split: Optional[str] = None
+    pretrain_test_split: Optional[str] = None
+    pretrain_image_column: Optional[str] = None
+    pretrain_label_column: Optional[str] = None
+    pretrain_sample_limit: Optional[int] = None
+    pretrain_output_dir: Optional[str] = None
 
 
 def get_classifier_config() -> ClassifierConfig:
@@ -141,6 +150,27 @@ def get_classifier_config() -> ClassifierConfig:
         raise ValueError("classifier.model_list and classifier.input_size must have the same length")
 
     seed_value = cfg.get("seed", cfg.get("random_state", 42))
+
+    pretrain_cfg = cfg.get("pretrain", {}) or {}
+    if pretrain_cfg and not isinstance(pretrain_cfg, dict):
+        raise ValueError("classifier.pretrain must be a table in configs/train.toml")
+
+    def _opt_str(value) -> Optional[str]:
+        if value is None:
+            return None
+        value = str(value).strip()
+        return value or None
+
+    pretrain_dataset = _opt_str(pretrain_cfg.get("dataset"))
+    pretrain_enabled = bool(pretrain_cfg.get("enabled", bool(pretrain_dataset)))
+    pretrain_train_split = _opt_str(pretrain_cfg.get("train_split")) or "train"
+    pretrain_valid_split = _opt_str(pretrain_cfg.get("valid_split"))
+    pretrain_test_split = _opt_str(pretrain_cfg.get("test_split"))
+    pretrain_image_column = _opt_str(pretrain_cfg.get("image_column"))
+    pretrain_label_column = _opt_str(pretrain_cfg.get("label_column"))
+    pretrain_output_dir = _opt_str(pretrain_cfg.get("output_dir"))
+    pretrain_sample_limit_raw = pretrain_cfg.get("sample_limit")
+    pretrain_sample_limit = int(pretrain_sample_limit_raw) if pretrain_sample_limit_raw is not None else None
 
     return ClassifierConfig(
         model_names=model_names,
@@ -164,4 +194,13 @@ def get_classifier_config() -> ClassifierConfig:
         use_trackio=bool(cfg.get("use_trackio", False)),
         space_name=cfg.get("space_name"),
         upload_hf=bool(cfg.get("upload_hf", False)),
+        pretrain_enabled=pretrain_enabled,
+        pretrain_dataset=pretrain_dataset,
+        pretrain_train_split=pretrain_train_split,
+        pretrain_valid_split=pretrain_valid_split,
+        pretrain_test_split=pretrain_test_split,
+        pretrain_image_column=pretrain_image_column,
+        pretrain_label_column=pretrain_label_column,
+        pretrain_sample_limit=pretrain_sample_limit,
+        pretrain_output_dir=pretrain_output_dir,
     )
