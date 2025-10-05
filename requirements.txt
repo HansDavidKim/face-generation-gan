@@ -14,3 +14,6 @@ accelerate
 insightface
 onnxruntime-gpu
 opencv-python-headless
+insightface
+onnxruntime-gpu
+opencv-python

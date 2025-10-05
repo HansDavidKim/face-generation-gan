@@ -1,15 +1,10 @@
-"""Train a linear classifier on AuraFace embeddings."""
+"""Train a linear classifier on AuraFace embeddings (clean version)."""
 
 from __future__ import annotations
-
-import json
-import math
-import time
+import json, math, time
 from pathlib import Path
 from typing import Dict, Tuple
-
-import numpy as np
-import torch
+import numpy as np, torch
 from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
 from torchvision.datasets import ImageFolder
@@ -37,9 +32,7 @@ def _compute_embeddings(
             torch.from_numpy(cached["labels"]),
         )
 
-    embeddings = []
-    labels = []
-
+    embeddings, labels = [], []
     with tqdm(total=len(indices), desc=f"Extracting {split_name} embeddings") as pbar:
         for idx in indices:
             path, label = dataset.samples[idx]
@@ -58,31 +51,28 @@ def _compute_embeddings(
     emb_array = np.stack(embeddings).astype(np.float32)
     label_array = np.asarray(labels, dtype=np.int64)
     np.savez(cache_path, embeddings=emb_array, labels=label_array)
-
     return torch.from_numpy(emb_array), torch.from_numpy(label_array)
 
 
 def _evaluate(model: nn.Module, loader: DataLoader, device: torch.device) -> Dict[str, float]:
     criterion = nn.CrossEntropyLoss()
     model.eval()
-    total_loss = 0.0
-    correct = 0
-    total = 0
+    total_loss, correct, total = 0.0, 0, 0
 
     with torch.no_grad():
-        for inputs, targets in loader:
-            inputs = inputs.to(device)
-            targets = targets.to(device)
-            outputs = model(inputs)
-            loss = criterion(outputs, targets)
-            preds = outputs.argmax(dim=1)
-            correct += (preds == targets).sum().item()
-            total += targets.size(0)
-            total_loss += loss.item() * targets.size(0)
+        for x, y in loader:
+            x, y = x.to(device), y.to(device)
+            out = model(x)
+            loss = criterion(out, y)
+            pred = out.argmax(1)
+            correct += (pred == y).sum().item()
+            total += y.size(0)
+            total_loss += loss.item() * y.size(0)
 
-    accuracy = correct / total if total else math.nan
-    loss_value = total_loss / total if total else math.nan
-    return {"loss": loss_value, "accuracy": accuracy}
+    return {
+        "loss": total_loss / total if total else math.nan,
+        "accuracy": correct / total if total else math.nan,
+    }
 
 
 def train_feature_classifier(
@@ -107,97 +97,85 @@ def train_feature_classifier(
     )
 
     cache_dir = Path(cache_dir) / Path(data_root).name
-    train_embeddings, train_labels = _compute_embeddings(dataset, train_idx, cache_dir, "train")
-    valid_embeddings, valid_labels = _compute_embeddings(dataset, valid_idx, cache_dir, "valid")
-    test_embeddings, test_labels = _compute_embeddings(dataset, test_idx, cache_dir, "test")
+    train_emb, train_lab = _compute_embeddings(dataset, train_idx, cache_dir, "train")
+    valid_emb, valid_lab = _compute_embeddings(dataset, valid_idx, cache_dir, "valid")
+    test_emb, test_lab = _compute_embeddings(dataset, test_idx, cache_dir, "test")
 
-    embedding_dim = train_embeddings.size(1)
+    embedding_dim = train_emb.size(1)
     num_classes = len(dataset.classes)
 
-    train_dataset = TensorDataset(train_embeddings, train_labels)
-    valid_dataset = TensorDataset(valid_embeddings, valid_labels)
-    test_dataset = TensorDataset(test_embeddings, test_labels)
+    train_ds = TensorDataset(train_emb, train_lab)
+    valid_ds = TensorDataset(valid_emb, valid_lab)
+    test_ds = TensorDataset(test_emb, test_lab)
 
-    train_loader = DataLoader(train_dataset, batch_size=cfg.batch_size, shuffle=True)
-    valid_loader = DataLoader(valid_dataset, batch_size=cfg.batch_size, shuffle=False)
-    test_loader = DataLoader(test_dataset, batch_size=cfg.batch_size, shuffle=False)
+    train_loader = DataLoader(train_ds, batch_size=cfg.batch_size, shuffle=True)
+    valid_loader = DataLoader(valid_ds, batch_size=cfg.batch_size, shuffle=False)
+    test_loader = DataLoader(test_ds, batch_size=cfg.batch_size, shuffle=False)
 
-    torch_device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
-    model = nn.Linear(embedding_dim, num_classes).to(torch_device)
+    device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
+    model = nn.Linear(embedding_dim, num_classes).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=cfg.learning_rate)
     criterion = nn.CrossEntropyLoss()
 
     metrics: Dict[str, Dict[str, float]] = {}
-    best_valid_accuracy = -math.inf
-    best_state = None
-
+    best_acc, best_state = -math.inf, None
     start = time.time()
+
     for epoch in range(cfg.epochs):
         model.train()
-        epoch_loss = 0.0
-        for inputs, targets in train_loader:
-            inputs = inputs.to(torch_device)
-            targets = targets.to(torch_device)
+        for x, y in train_loader:
+            x, y = x.to(device), y.to(device)
             optimizer.zero_grad()
-            outputs = model(inputs)
-            loss = criterion(outputs, targets)
+            loss = criterion(model(x), y)
             loss.backward()
             optimizer.step()
-            epoch_loss += loss.item() * targets.size(0)
 
-        train_metrics = _evaluate(model, train_loader, torch_device)
-        valid_metrics = _evaluate(model, valid_loader, torch_device)
-        metrics[f"epoch_{epoch + 1}"] = {
-            "train_loss": train_metrics["loss"],
-            "train_accuracy": train_metrics["accuracy"],
-            "valid_loss": valid_metrics["loss"],
-            "valid_accuracy": valid_metrics["accuracy"],
+        tr = _evaluate(model, train_loader, device)
+        va = _evaluate(model, valid_loader, device)
+        metrics[f"epoch_{epoch+1}"] = {
+            "train_loss": tr["loss"], "train_accuracy": tr["accuracy"],
+            "valid_loss": va["loss"], "valid_accuracy": va["accuracy"]
         }
 
-        if valid_metrics["accuracy"] > best_valid_accuracy:
-            best_valid_accuracy = valid_metrics["accuracy"]
-            best_state = model.state_dict()
+        if va["accuracy"] > best_acc:
+            best_acc, best_state = va["accuracy"], model.state_dict()
 
-    if best_state is not None:
+    if best_state:
         model.load_state_dict(best_state)
 
-    test_metrics = _evaluate(model, test_loader, torch_device)
+    te = _evaluate(model, test_loader, device)
     total_time = time.time() - start
 
     summary = {
-        "train_samples": len(train_dataset),
-        "valid_samples": len(valid_dataset),
-        "test_samples": len(test_dataset),
-        "test_loss": test_metrics["loss"],
-        "test_accuracy": test_metrics["accuracy"],
+        "train_samples": len(train_ds),
+        "valid_samples": len(valid_ds),
+        "test_samples": len(test_ds),
+        "test_loss": te["loss"],
+        "test_accuracy": te["accuracy"],
         "training_time_sec": total_time,
     }
 
-    output_dir = Path(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    metrics_path = output_dir / "aura_classifier_metrics.json"
-    with metrics_path.open("w", encoding="utf-8") as fh:
-        json.dump({"history": metrics, "summary": summary}, fh, indent=2)
+    out = Path(output_dir); out.mkdir(parents=True, exist_ok=True)
+    with (out / "aura_classifier_metrics.json").open("w", encoding="utf-8") as f:
+        json.dump({"history": metrics, "summary": summary}, f, indent=2)
 
-    model_path = output_dir / "aura_classifier.pt"
-    torch.save({"state_dict": model.state_dict(), "embedding_dim": embedding_dim, "num_classes": num_classes}, model_path)
+    torch.save({
+        "state_dict": model.state_dict(),
+        "embedding_dim": embedding_dim,
+        "num_classes": num_classes,
+    }, out / "aura_classifier.pt")
 
     return {"summary": summary, "history": metrics}
 
 
 if __name__ == "__main__":
+    # config에서 설정된 값 그대로 사용
     cfg = get_classifier_config()
-    from utils.helper import get_dataset_list
-
-    dataset_list = get_dataset_list()
-    dataset_list = list(map(lambda x: x.split('/')[1], dataset_list))
-
-    for data in dataset_list[:-1]:
-        train_feature_classifier(
-            data_root=f"private/{data}",
-            output_dir=f"checkpoints/aura_{data}",
-            device=None,
-            cfg=cfg,
-            cache_dir=f"cache/aura_embeddings/{data}",
-        )
-
+    # 단일 데이터셋 실행
+    train_feature_classifier(
+        data_root="private/sample_dataset",
+        output_dir="checkpoints/aura_sample",
+        device=None,
+        cfg=cfg,
+        cache_dir="cache/aura_embeddings/sample_dataset",
+    )
