@@ -1,12 +1,12 @@
 [classifier]
 
 model_list = [
+    'minchul/cvlface_adaface_ir50_ms1mv2',
     'timm/vgg16.tv_in1k', 
     'microsoft/resnet-152', 
-    'minchul/cvlface_adaface_ir50_ms1mv2'
     ]
 
-input_size = [224, 224, 112]
+input_size = [112, 224, 224]
 
 optimizer = 'SGD'
 learning_rate = 5e-5
