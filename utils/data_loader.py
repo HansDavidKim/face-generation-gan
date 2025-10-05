@@ -164,19 +164,22 @@ def build_hf_datasets(
         ):
             # priority: explicit mapping → default → alternatives
             if hf_splits and key in hf_splits and hf_splits[key]:
-                candidates = (hf_splits[key],)
+                candidates = tuple(filter(None, (hf_splits[key],)))
             else:
                 base = (default,) if default else ()
                 candidates = base + alternatives
 
+            attempted: list[str] = []
             for name in candidates:
                 if not name:
                     continue
                 if name in dataset_dict:
                     return dataset_dict[name]
-                print(
-                    f"Warning: split '{name}' not found in dataset '{hf_dataset}'; trying next option"
-                )
+                attempted.append(name)
+
+            if attempted:
+                tried = ", ".join(attempted)
+                print(f"Warning: none of splits [{tried}] found in dataset '{hf_dataset}'")
             return None
 
         train_dataset = _resolve_split("train", "train")
