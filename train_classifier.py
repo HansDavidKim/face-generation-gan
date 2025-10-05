@@ -63,10 +63,7 @@ def _create_training_arguments(
     run_dir = output_dir / _sanitize_model_name(model_name)
     run_dir.mkdir(parents=True, exist_ok=True)
 
-    if evaluation:
-        eval_strategy = "epoch"
-    else:
-        eval_strategy = "no"
+    eval_strategy = "epoch" if evaluation else "no"
     save_strategy = "epoch"
 
     report_to: list[str] = []
@@ -121,8 +118,10 @@ def _create_training_arguments(
         kwargs["remove_unused_columns"] = False
     if "save_steps" in signature.parameters and "save_strategy" not in kwargs:
         kwargs["save_steps"] = 1_000_000  # effectively disable frequent saves
+
+    # tqdm 활성화 (기존: True → False)
     if "disable_tqdm" in signature.parameters:
-        kwargs["disable_tqdm"] = True
+        kwargs["disable_tqdm"] = False
 
     return TrainingArguments(**kwargs)
 
@@ -190,7 +189,6 @@ def train_single_classifier(
     cfg = cfg or get_classifier_config()
     fix_randomness(cfg.seed, cfg.deterministic)
 
-    # === 안전한 수정: label_column 지정 우선 처리 ===
     train_dataset, valid_dataset, test_dataset, num_classes = build_hf_datasets(
         data_root,
         model_name,
@@ -199,9 +197,8 @@ def train_single_classifier(
         hf_dataset=hf_dataset,
         hf_splits=hf_splits,
         hf_image_column=hf_image_column,
-        hf_label_column=hf_label_column,  # <<-- 추가적으로 전달
+        hf_label_column=hf_label_column,
     )
-    # ==================================================
 
     model_source = model_init_path or model_name
     model = _create_model(model_source, num_classes)
@@ -365,7 +362,38 @@ def pretrain_classifiers(
     return results
 
 
-__all__ = ["train_single_classifier", "train_all_classifiers", "pretrain_classifiers"]
+class _ProgressBarCallback(TrainerCallback):
+    def __init__(self, description: str):
+        self.description = description
+        self._pbar: Optional[tqdm] = None
+        self._last_step: int = 0
+
+    def on_train_begin(self, args, state, control, **kwargs):
+        total = state.max_steps if state.max_steps and state.max_steps > 0 else None
+        self._pbar = tqdm(total=total, desc=self.description, leave=True, dynamic_ncols=True)
+        self._last_step = 0
+
+    def on_step_end(self, args, state, control, **kwargs):
+        if not self._pbar:
+            return
+        step = state.global_step or 0
+        delta = step - self._last_step
+        if delta > 0:
+            self._pbar.update(delta)
+            self._last_step = step
+
+    def on_log(self, args, state, control, logs=None, **kwargs):
+        if not self._pbar or not logs:
+            return
+        if "loss" in logs:
+            self._pbar.set_postfix(loss=f"{logs['loss']:.4f}")
+        elif "eval_loss" in logs:
+            self._pbar.set_postfix(eval_loss=f"{logs['eval_loss']:.4f}")
+
+    def on_train_end(self, args, state, control, **kwargs):
+        if self._pbar:
+            self._pbar.close()
+            self._pbar = None
 
 
 if __name__ == "__main__":
@@ -373,7 +401,7 @@ if __name__ == "__main__":
 
     from utils.helper import get_dataset_list
     dataset_list = get_dataset_list()
-    dataset_list = list(map(lambda x : x.split('/')[1], dataset_list))
+    dataset_list = list(map(lambda x: x.split('/')[1], dataset_list))
 
     pretrained_map: Dict[str, str] = {}
 
@@ -401,35 +429,3 @@ if __name__ == "__main__":
             skip_models=None,
             pretrained_checkpoints=pretrained_map,
         )
-class _ProgressBarCallback(TrainerCallback):
-    def __init__(self, description: str):
-        self.description = description
-        self._pbar: Optional[tqdm] = None
-        self._last_step: int = 0
-
-    def on_train_begin(self, args, state, control, **kwargs):  # type: ignore[override]
-        total = state.max_steps if state.max_steps and state.max_steps > 0 else None
-        self._pbar = tqdm(total=total, desc=self.description, leave=True, dynamic_ncols=True)
-        self._last_step = 0
-
-    def on_step_end(self, args, state, control, **kwargs):  # type: ignore[override]
-        if not self._pbar:
-            return
-        step = state.global_step or 0
-        delta = step - self._last_step
-        if delta > 0:
-            self._pbar.update(delta)
-            self._last_step = step
-
-    def on_log(self, args, state, control, logs=None, **kwargs):  # type: ignore[override]
-        if not self._pbar or not logs:
-            return
-        if "loss" in logs:
-            self._pbar.set_postfix(loss=f"{logs['loss']:.4f}")
-        elif "eval_loss" in logs:
-            self._pbar.set_postfix(eval_loss=f"{logs['eval_loss']:.4f}")
-
-    def on_train_end(self, args, state, control, **kwargs):  # type: ignore[override]
-        if self._pbar:
-            self._pbar.close()
-            self._pbar = None
